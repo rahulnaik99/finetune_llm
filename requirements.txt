@@ -1,0 +1,64 @@
+# requirements.txt
+# ─────────────────
+# Install all at once:  pip install -r requirements.txt
+#
+# Platform notes:
+#   Apple Silicon:  mlx-lm is required, bitsandbytes is NOT needed
+#   NVIDIA GPU:     bitsandbytes is required, mlx-lm is NOT needed
+#   Colab/RunPod:   install from requirements-gpu.txt instead
+
+# ── Simulation (all platforms) ────────────────────────────────────────────────
+yfinance>=0.2.36
+pandas>=2.0
+numpy>=1.24
+matplotlib>=3.7
+requests>=2.31
+ipywidgets>=8.0
+jupyter>=1.0
+
+# ── Production data layer ─────────────────────────────────────────────────────
+polars>=0.20          # fast DataFrames (replaces pandas for large data)
+duckdb>=0.10          # SQL on Parquet — no full file load needed
+pyarrow>=14.0         # Parquet I/O backend
+
+# ── MLflow (all platforms) ────────────────────────────────────────────────────
+mlflow>=2.10
+
+# ── DVC pipeline (all platforms) ─────────────────────────────────────────────
+dvc>=3.0
+dvc-s3>=3.0            # for S3 remote storage (optional)
+
+# ── Prefect orchestration ──────────────────────────────────────────────────────
+prefect>=2.14
+
+# ── Monitoring ────────────────────────────────────────────────────────────────
+evidently>=0.4
+
+# ── HuggingFace stack (all platforms — needed for tokenizer) ─────────────────
+transformers>=4.40
+datasets>=2.18
+tokenizers>=0.19
+
+# ── LoRA/QLoRA — NVIDIA GPU ONLY ─────────────────────────────────────────────
+# SKIP on Apple Silicon — use mlx-lm instead
+# peft>=0.10
+# trl>=0.8
+# bitsandbytes>=0.43    # 4-bit/8-bit quantisation (CUDA only)
+# accelerate>=0.28
+# unsloth                # optional: 2× faster LoRA on CUDA
+# flash-attn             # optional: faster attention on NVIDIA Ampere+
+
+# ── Apple Silicon (M1/M2/M3/M4/M5) ──────────────────────────────────────────
+# SKIP on NVIDIA
+# mlx-lm>=0.10           # native LoRA fine-tuning on Apple Silicon
+
+# ── vLLM production serving (NVIDIA GPU only) ────────────────────────────────
+# SKIP on Apple Silicon
+# vllm>=0.4              # production LLM serving with PagedAttention
+# openai>=1.10           # client for vLLM OpenAI-compatible API
+
+# ── Axolotl (optional — NVIDIA GPU, replaces train.py) ───────────────────────
+# axolotl[flash-attn]    # pip install axolotl[flash-attn]
+
+nest_asyncio>=1.6    # needed by inference_vllm.py in notebook contexts
+PyYAML>=6.0          # needed to read params.yaml
