@@ -138,7 +138,7 @@ def build_compact_user(symbol, date_str, tech, fund, capital, history, initial_c
         f"C:{close} ({'+' if (day_chg or 0)>=0 else ''}{day_chg}%) | "
         f"5d:{d5_low}-{d5_high} C@{pct_pos:.0f}pct\n"
         f"ATR:{atr_approx} | Vol:{last_vol/1e6:.1f}M({vol_ratio}×avg) | "
-        f"3d:{'+' if (d3_chg or 0)>=0 else ''}{d3_chg}% | body:{body_r}\n\n"
+        f"3d:{'+' if (d3_chg or 0)>=0 else ''}{d3_chg if d3_chg is not None else 0}% | body:{body_r}\n\n"
 
         f"EMA: 50@{e50} {'<' if (e50 or 0)<(e100 or 0) else '>'} "
         f"100@{e100} {'<' if (e100 or 0)<(e200 or 0) else '>'} "
@@ -148,8 +148,8 @@ def build_compact_user(symbol, date_str, tech, fund, capital, history, initial_c
         f"Trend:{tech.get('trend','—')} | "
         f"Struct:{','.join(tech.get('structure',[]) or ['—'])}\n\n"
 
-        f"S:{sup_str}  (nearest {dist_s:+.1f}%)" + (f"\n" if sup_str != "—" else " —\n") +
-        f"R:{res_str}  (nearest {'+' if (dist_r or 0)>=0 else ''}{dist_r}%)" +
+        f"S:{sup_str}  (nearest {(dist_s if dist_s is not None else 0):+.1f}%)" + (f"\n" if sup_str != "—" else " —\n") +
+        f"R:{res_str}  (nearest {'+' if (dist_r or 0)>=0 else ''}{dist_r if dist_r is not None else 0}%)" +
         (f"\n" if res_str != "—" else " —\n") +
         f"SH:{sh_str} | SL:{sl_str}\n"
         f"{fund_line}\n\n"

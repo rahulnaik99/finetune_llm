@@ -335,4 +335,3 @@ Questions you can now answer with real code:
 | "How do you know when to retrain?" | Evidently AI — monitors action/confidence drift | `monitoring.py` |
 | "How do you query 4 years of 1-min data?" | DuckDB predicate pushdown on Parquet | `candle_store.py` |
 | "How do you orchestrate ML pipelines?" | Prefect flows with retries and scheduling | `prefect_flows.py` |
-# finetune_llm

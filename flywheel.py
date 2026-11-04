@@ -23,15 +23,11 @@ import argparse, json, os, shutil, sys
 from datetime import datetime
 from pathlib import Path
 
-# ── make sure the simulation notebook code is importable ─────────────────────
-# (assumes flywheel.py lives next to trading_agent_sim's helper functions,
-#  or you copy the cell logic into separate .py modules)
-# For a clean project layout, refactor each notebook cell into a module:
-#   simulation/data.py         ← get_candles, get_fundamentals
-#   simulation/technicals.py   ← compute_technicals
-#   simulation/llm.py          ← pre_trade_decision, post_trade_analysis
-#   simulation/agent.py        ← TradingAgent, check_sl_tp
-# Then import them here.
+# ── The simulation now lives in simulation.py (importable module) ────────────
+# All simulation logic — data fetching, technicals, LLM decisions, TradingAgent —
+# is in simulation.py. Both this file and trading_agent_sim.ipynb import from it.
+import simulation
+from simulation import TradingAgent, init_db, set_llm_backend
 
 ROUNDS_LOG = []   # tracks performance across rounds
 
@@ -49,40 +45,32 @@ def run_simulation_round(
 ) -> dict:
     """
     Run N trading episodes.
-    If adapter_path is set, use the fine-tuned model.
-    Otherwise use FALLBACK_MODE (rule-based) for the very first round.
+    If adapter_path is set, use the fine-tuned model (student).
+    Otherwise use the teacher model (Ollama) if set, else rule-based fallback.
     """
-    # Swap model source in the simulation
+    simulation.DB_PATH = db_path
+    init_db()
+
     if adapter_path and Path(adapter_path).exists():
-        # Fine-tuned model available → use it
-        from inference import get_trader
-        trader = get_trader(adapter_path)
-
-        # Monkey-patch the _ollama function used inside pre_trade_decision
-        # NOTE: import simulation.llm as llm_module — convert notebook to module first
-        original_ollama = llm_module._ollama
-
-        def patched_ollama(system, user, temp=0.2):
-            return trader.generate(system, user)
-
-        llm_module._ollama = patched_ollama
+        set_llm_backend("adapter", adapter_path)
         print(f"  Using fine-tuned adapter: {adapter_path}")
+    elif os.environ.get("USE_OLLAMA", "0") == "1":
+        set_llm_backend("ollama")
+        print(f"  Using Ollama teacher model: {simulation.OLLAMA_MODEL}")
     else:
-        print("  No adapter yet — using rule-based fallback")
-
-    # Import TradingAgent (adjust import path to your layout)
-    # NOTE: from simulation.agent import TradingAgent — convert notebook to module first
+        set_llm_backend("fallback")
+        print("  Using rule-based fallback (set USE_OLLAMA=1 for teacher model)")
 
     agent = TradingAgent(symbol=symbol, start_date=start_date, capital=initial_cap)
     for ep in range(1, n_episodes + 1):
         if not agent.alive():
-            print(f"  Agent died at episode {ep}")
+            print(f"  Agent died at episode {ep} (capital {agent.capital:,.0f})")
             break
-        agent.run_episode()
-
-    # Restore original ollama function
-    if adapter_path and Path(adapter_path).exists():
-        llm_module._ollama = original_ollama
+        try:
+            agent.run_episode()
+        except Exception as e:
+            print(f"  Episode {ep} error: {e} -- skipping day")
+            agent.date = simulation.next_trading_day(agent.date, 1)
 
     wins   = sum(1 for t in agent.history if t["pnl"] > 0)
     losses = sum(1 for t in agent.history if t["pnl"] < 0)
