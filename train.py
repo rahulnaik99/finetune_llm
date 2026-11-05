@@ -413,6 +413,13 @@ def _print_lora_diagram(r: int):
 #  MAIN
 # ════════════════════════════════════════════════════════════════════
 def main():
+    # Load .env so standalone `python train.py` also honours central config.
+    try:
+        from config import load_env, env_int, env_str
+        load_env()
+    except Exception:
+        env_int = env_str = None
+
     p = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
                                 description=__doc__)
     p.add_argument("--train",          required=True,  help="Training JSONL path")
@@ -427,6 +434,7 @@ def main():
     p.add_argument("--max_seq_length", type=int,   default=1024)
     p.add_argument("--iters",          type=int,   default=600,   help="MLX only: training iterations")
     p.add_argument("--save_every",     type=int,   default=100,   help="Save checkpoint every N steps")
+    p.add_argument("--num_layers",     type=int,   default=None,  help="MLX only: # transformer layers to adapt")
     p.add_argument("--force_method",   default=None,
                    choices=["mlx_lora","lora","qlora_8bit","qlora_4bit"],
                    help="Force a specific training method instead of auto-detecting")
@@ -463,6 +471,14 @@ def main():
             "gate_proj","up_proj","down_proj"
         ]
         cfg["lora_layers"] = 8
+
+    # ── .env overrides (highest priority after explicit CLI flags) ────────────
+    if env_int is not None:
+        # MLX num-layers: CLI flag > .env MLX_NUM_LAYERS > params.yaml value
+        if args.num_layers is not None:
+            cfg["lora_layers"] = args.num_layers
+        else:
+            cfg["lora_layers"] = env_int("MLX_NUM_LAYERS", cfg.get("lora_layers", 8))
 
     # ── Detect hardware ───────────────────────────────────────────────
     hw = detect_hardware()

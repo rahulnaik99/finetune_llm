@@ -139,23 +139,39 @@ def finetune_round(
     # Start from previous adapter if available (continual learning)
     start_from = str(prev_adapter) if prev_adapter and Path(prev_adapter).exists() else base_model
 
+    # Use train.py — it auto-detects hardware (MLX on Apple Silicon, QLoRA on NVIDIA).
+    # This avoids needing torch/bitsandbytes on a Mac.
+    # Iterations, rank and num-layers come from .env so you never edit code.
+    from config import env_int
     cmd = [
-        sys.executable, "train_qlora.py",
+        sys.executable, "train.py",
         "--train",      str(merged_path),
         "--val",        str(val_path) if val_path.exists() else str(merged_path),
         "--model",      start_from,
         "--output_dir", str(new_adapter),
-        "--epochs",     "2",          # fewer epochs per round (data grows each round)
-        "--lora_r",     "16",
+        "--epochs",     str(env_int("EPOCHS", 2)),
+        "--lora_r",     str(env_int("LORA_R", 16)),
+        "--iters",      str(env_int("MLX_ITERS", 600)),
+        "--save_every", str(env_int("SAVE_EVERY", 100)),
     ]
 
     print(f"  Training on {len(all_train)} total examples...")
     print(f"  Starting from: {start_from}")
+    print(f"  (train.py auto-detects hardware: MLX on Apple Silicon, QLoRA on NVIDIA)")
     result = subprocess.run(cmd, capture_output=False)
 
-    final = new_adapter / "final_adapter"
-    if not final.exists():
-        raise RuntimeError(f"Training failed — adapter not found at {final}")
+    # train.py (MLX path) saves to <output_dir>/adapters or <output_dir>/final_adapter
+    candidates = [
+        new_adapter / "final_adapter",
+        new_adapter / "adapters",
+        new_adapter / "fused_model",
+    ]
+    final = next((c for c in candidates if c.exists()), None)
+    if final is None:
+        raise RuntimeError(
+            f"Training failed — no adapter found in {new_adapter}. "
+            f"On Mac: pip install mlx-lm. On NVIDIA: pip install torch peft trl bitsandbytes."
+        )
 
     print(f"  New adapter: {final}")
     return str(final)
@@ -257,16 +273,34 @@ def flywheel(
 
 
 if __name__ == "__main__":
+    # Load .env so every knob (symbol, rounds, episodes, model, backend...) is
+    # configurable WITHOUT editing code. CLI flags still override .env.
+    from config import load_env, env_str, env_int, env_bool
+    load_env()
+
+    # USE_OLLAMA / OLLAMA_MODEL are read by simulation via the environment;
+    # make sure .env values are visible to run_simulation_round's checks.
     p = argparse.ArgumentParser()
-    p.add_argument("--symbol",             default="CANBK")
-    p.add_argument("--start_date",         default="2024-01-10")
-    p.add_argument("--rounds",       type=int, default=5)
-    p.add_argument("--episodes",     type=int, default=50)
-    p.add_argument("--adapter_dir",        default="output/adapters")
-    p.add_argument("--data_dir",           default="data/rounds")
-    p.add_argument("--db",                 default="trading_agent.db")
-    p.add_argument("--base_model",         default="nvidia/Nemotron-Nano-4B-Instruct")
+    p.add_argument("--symbol",       default=env_str("SYMBOL", "CANBK"))
+    p.add_argument("--start_date",   default=env_str("START_DATE", "2024-01-10"))
+    p.add_argument("--rounds",       type=int, default=env_int("ROUNDS", 5))
+    p.add_argument("--episodes",     type=int, default=env_int("EPISODES", 50))
+    p.add_argument("--adapter_dir",  default=env_str("ADAPTER_DIR", "output/adapters"))
+    p.add_argument("--data_dir",     default=env_str("DATA_DIR", "data/rounds"))
+    p.add_argument("--db",           default=env_str("DB_PATH", "trading_agent.db"))
+    p.add_argument("--base_model",   default=env_str("BASE_MODEL",
+                                                     "mlx-community/NVIDIA-Nemotron-3.5-Bolt-E4B-OptiQ-4bit"))
     args = p.parse_args()
+
+    print("="*70)
+    print("  CONFIG (from .env / CLI)")
+    print(f"    symbol={args.symbol}  start={args.start_date}  "
+          f"rounds={args.rounds}  episodes={args.episodes}")
+    print(f"    base_model={args.base_model}")
+    print(f"    USE_OLLAMA={env_bool('USE_OLLAMA', False)}  "
+          f"OLLAMA_MODEL={env_str('OLLAMA_MODEL', 'nemotron-bolt-e4b-16k')}")
+    print(f"    mlx_iters={env_int('MLX_ITERS', 600)}  lora_r={env_int('LORA_R', 16)}")
+    print("="*70)
 
     flywheel(
         symbol=args.symbol,

@@ -10,6 +10,186 @@ production serving, orchestration, versioning, and monitoring.
 
 ---
 
+## TL;DR — Run it
+
+Everything is configured in **`.env`** (no code edits). The flywheel reads it automatically:
+
+```bash
+source venv/bin/activate          # activate your venv
+cp .env.example .env              # first time only (edit values as needed)
+PYTHONWARNINGS=ignore python flywheel.py
+```
+
+`python flywheel.py` with **no arguments** reads all settings from `.env`. CLI flags still override for one-offs (e.g. `python flywheel.py --symbol SBIN`).
+
+---
+
+## Configuration — all `.env` options
+
+| Variable | Default | What it does |
+|---|---|---|
+| `BASE_MODEL` | `mlx-community/NVIDIA-Nemotron-3.5-Bolt-E4B-OptiQ-4bit` | The student model to fine-tune. On Mac use an `mlx-community` 4-bit repo (ungated). |
+| `USE_OLLAMA` | `1` | `1` = Nemotron teacher (via Ollama) generates real training data. `0` = rule-based fallback (fast smoke test, low-quality data). |
+| `OLLAMA_MODEL` | `nemotron-bolt-e4b-16k` | Which Ollama model acts as the teacher. |
+| `OLLAMA_URL` | `http://localhost:11434/api/chat` | Ollama chat endpoint. |
+| `SYMBOL` | `CANBK` | NSE symbol to simulate (one per run; re-run with another to accumulate). |
+| `START_DATE` | `2024-01-10` | First simulation day. |
+| `ROUNDS` | `5` | Flywheel rounds (simulate → train → repeat). |
+| `EPISODES` | `50` | Episodes (trading days) per round. |
+| `MLX_ITERS` | `600` | MLX LoRA training iterations. **Set `50` for a smoke test**, `600` for a real run. |
+| `LORA_R` | `16` | LoRA rank (capacity). |
+| `MLX_NUM_LAYERS` | `8` | How many transformer layers get LoRA adapters (MLX). |
+| `EPOCHS` | `2` | Epochs (HuggingFace/NVIDIA path only). |
+| `SAVE_EVERY` | `100` | Checkpoint every N iterations. |
+| `DB_PATH` | `trading_agent.db` | SQLite trade log. |
+| `ADAPTER_DIR` | `output/adapters` | Where trained adapters/fused models are written. |
+| `DATA_DIR` | `data/rounds` | Where per-round JSONL datasets are written. |
+| `INITIAL_CAP` | `10000` | Starting capital per simulation. |
+| `RISK_PER_TRADE` | `0.02` | Max risk fraction per trade (fallback rule). |
+| `MAX_HOLD_DAYS` | `5` | Max bars to hold before time-exit. |
+| `LOOKBACK_DAYS` | `30` | Candle lookback window per decision. |
+| `MLFLOW_TRACKING_URI` | *(empty)* | Empty = local `./mlruns`. Set a URL for a remote MLflow server. |
+| `VLLM_BASE_URL` | `http://localhost:8001` | vLLM serving endpoint (NVIDIA only). |
+| `VLLM_MODEL` | `nemotron-trading` | Served model name for vLLM. |
+
+CLI flags that override `.env`: `--symbol --start_date --rounds --episodes --base_model --adapter_dir --data_dir --db`.
+
+---
+
+## Step 0 — One-time setup
+
+```bash
+# Apple Silicon
+python3.12 -m venv venv && source venv/bin/activate   # Python 3.12 recommended (mlx-lm wheels)
+pip install -r requirements.txt
+pip install mlx-lm                                     # the Mac training backend
+
+# Ollama teacher (for real data)
+ollama pull nemotron-bolt-e4b-16k                      # or your custom 16k-context model
+ollama ps                                              # confirm it's available
+```
+
+> **NVIDIA GPU instead of Mac:** `pip install torch peft trl bitsandbytes accelerate` and set `BASE_MODEL` to a standard HF repo; `train.py` auto-switches to QLoRA.
+
+---
+
+## Step 1 — Verify (smoke test, ~10 min)
+
+Prove the whole loop (generate → train → adapter) on tiny data before committing hours. Edit `.env`:
+
+```ini
+USE_OLLAMA=1
+ROUNDS=1
+EPISODES=20
+MLX_ITERS=50
+```
+
+Run and verify:
+
+```bash
+# clean slate
+rm -f trading_agent.db && rm -rf output/adapters data/rounds
+
+# run the tiny flywheel
+PYTHONWARNINGS=ignore python flywheel.py
+
+# 1) adapter files were produced?
+ls -la output/adapters/round_01/fused_model
+
+# 2) does the fine-tuned model emit a valid decision?
+python -m mlx_lm generate \
+  --model output/adapters/round_01/fused_model --max-tokens 200 \
+  --prompt "[CANBK 2024-01-10]
+C:119.78 EMA:50>100>200 [BULLISH] VWAP:119.2 above
+S:116.5-117.2  R:122-123.5
+You are a trader. Output JSON only: action, stop_loss, take_profit, reasoning."
+```
+
+**Pass criteria:** Step 1 prints valid JSON with `action` / `stop_loss` / `take_profit` / `reasoning`. (With 50 iters quality is rough — you're testing plumbing, not performance.)
+
+Other quick checks:
+
+```bash
+# confirm the config the flywheel will use (printed at startup)
+python flywheel.py --help
+
+# confirm .env is being read
+python -c "from config import load_env,env_str,env_bool,env_int; load_env(); \
+print('model',env_str('BASE_MODEL','?')); print('ollama',env_bool('USE_OLLAMA')); \
+print('rounds',env_int('ROUNDS',0),'episodes',env_int('EPISODES',0),'iters',env_int('MLX_ITERS',0))"
+
+# confirm Ollama teacher is reachable
+ollama ps
+```
+
+---
+
+## Step 2 — Real run (scale up)
+
+Flip the values in `.env`:
+
+```ini
+USE_OLLAMA=1
+ROUNDS=5
+EPISODES=50
+MLX_ITERS=600
+```
+
+```bash
+rm -f trading_agent.db && rm -rf output/adapters data/rounds
+PYTHONWARNINGS=ignore python flywheel.py
+```
+
+**Healthy signs:** episodes show varied `BUY`/`SELL` (not just HOLD); training `val` loss settles around **0.3–0.8** (not collapsing to ~0.01, which means the data was rule-based).
+
+### Getting to 500+ examples — run multiple symbols
+
+Each episode yields ~2 samples; the quality filter drops HOLD/low-RR ones. For volume + variety, run several symbols (they all append to the same `DB_PATH`):
+
+```bash
+for SYM in CANBK SBIN HDFCBANK ICICIBANK AXISBANK PNB BANKBARODA; do
+  SYMBOL=$SYM START_DATE=2023-06-01 ROUNDS=1 EPISODES=80 \
+  PYTHONWARNINGS=ignore python flywheel.py
+done
+```
+
+7 symbols × 80 episodes × ~2 samples ≈ 1,100 raw → comfortably 500+ after filtering.
+
+---
+
+## Deploy the fine-tuned model back to Ollama (with your 16k context)
+
+```bash
+# the fused model is a standalone MLX model
+MODEL=output/adapters/round_05/fused_model
+
+# convert MLX → GGUF (needs llama.cpp tools), then:
+cat > Modelfile <<'EOF'
+FROM ./nemotron-trading.gguf
+PARAMETER num_ctx 16384          # ← your extended context
+EOF
+ollama create nemotron-bolt-e4b-16k-trading -f Modelfile
+```
+
+The `-16k` context is a runtime `num_ctx` setting (re-applied here), not part of the weights — fine-tuning never changes it.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `Pandas4Warning … inplace` spam | yfinance internals | Prefix with `PYTHONWARNINGS=ignore` (already in the commands above). |
+| `exec: "cd": executable file not found` | zsh ran `cd` as a program | Already handled; never paste `# separate terminal` comments into zsh. |
+| `No module named 'torch'` | Mac has no CUDA stack | Use MLX: `pip install mlx-lm` (the flywheel calls `train.py` which auto-selects MLX). |
+| `401 Unauthorized` on model download | wrong/gated repo | Use an `mlx-community` 4-bit repo in `BASE_MODEL`, or `hf auth login` + accept the license. |
+| `val loss ≈ 0.01` | trained on rule-based data | Set `USE_OLLAMA=1` so the LLM teacher generates real decisions. |
+| `Final adapter: None` / `adapter not found` | old flywheel only looked for `final_adapter` | This build searches `fused_model`/`adapters`/`final_adapter` — re-pull this zip. |
+| `ollama` decisions never vary (all HOLD) | Ollama not running or model missing | `ollama ps`; `ollama pull nemotron-bolt-e4b-16k`. |
+
+---
+
+
 ## What LoRA and QLoRA actually do
 
 The model has 4 billion parameters. Retraining all of them needs ~60 GB VRAM and

@@ -30,6 +30,17 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import warnings
+# Silence the flood of pandas/yfinance deprecation warnings (inplace, PDEP-8, etc.)
+# These come from yfinance internals, not our code — safe to suppress.
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
+try:
+    from pandas.errors import Pandas4Warning
+    warnings.filterwarnings("ignore", category=Pandas4Warning)
+except Exception:
+    pass
+
 import numpy as np
 import pandas as pd
 import requests
