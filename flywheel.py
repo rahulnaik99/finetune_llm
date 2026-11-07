@@ -180,6 +180,60 @@ def finetune_round(
 # ════════════════════════════════════════════════════════════════════
 #  MAIN LOOP
 # ════════════════════════════════════════════════════════════════════
+def evaluate_round(data_dir: str, round_num: int, adapter_path: str | None) -> dict:
+    """
+    Evaluate the round on its walk-forward TEST split:
+      - trading metrics from recorded P&L (pure math, always available)
+      - model-quality metrics IF a trained adapter + MLX are available (optional)
+    Prints a summary, logs to MLflow when configured, and never raises.
+    """
+    out = {}
+    try:
+        from evaluate import trading_metrics, pnls_from_test_meta, evaluate_model_quality
+        test_path = Path(data_dir) / f"round_{round_num:02d}" / "trading_test.jsonl"
+        if not test_path.exists():
+            return out
+
+        tm = trading_metrics(pnls_from_test_meta(str(test_path)))
+        out["trading"] = tm
+        print(f"\n[4/4] Eval (walk-forward test): win {tm.get('win_rate','?')}% | "
+              f"expectancy {tm.get('expectancy','?')} | PF {tm.get('profit_factor','?')} | "
+              f"Sharpe {tm.get('sharpe_per_trade','?')} | maxDD {tm.get('max_drawdown','?')}")
+
+        # Optional model-quality (needs the fine-tuned model + mlx_lm)
+        fused = None
+        if adapter_path:
+            cand = [Path(adapter_path), Path(adapter_path).parent / "fused_model"]
+            fused = next((str(c) for c in cand if c.exists()), None)
+        if fused:
+            try:
+                from evaluate import mlx_generate_factory
+                gen = mlx_generate_factory(fused)
+                q = evaluate_model_quality(str(test_path), gen)
+                out["quality"] = q
+                print(f"       quality: JSON {q['json_validity']}% | schema {q['schema_ok']}% | "
+                      f"reasoning {q['reasoning_ok']}% | features_used {q['features_used_ok']}% | "
+                      f"action_match {q['action_match']}%")
+            except Exception as e:
+                print(f"       (model-quality eval skipped: {e})")
+
+        # Log to MLflow if available
+        try:
+            import mlflow
+            with mlflow.start_run(run_name=f"eval-round-{round_num}", nested=True):
+                for k, v in (out.get("trading") or {}).items():
+                    if isinstance(v, (int, float)):
+                        mlflow.log_metric(f"test_{k}", v)
+                for k, v in (out.get("quality") or {}).items():
+                    if isinstance(v, (int, float)):
+                        mlflow.log_metric(f"quality_{k}", v)
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"  (eval skipped: {e})")
+    return out
+
+
 def flywheel(
     symbol: str,
     start_date: str,
@@ -241,12 +295,16 @@ def flywheel(
         except Exception as e:
             print(f"  Training failed: {e}. Keeping previous adapter.")
 
+        # ── 4. Evaluate on the walk-forward TEST set (always-on, never fatal) ──
+        eval_metrics = evaluate_round(data_dir, rnd, current_adapter)
+
         ROUNDS_LOG.append({
             "round": rnd,
             "sim": sim_stats,
             "n_examples": n_examples,
             "adapter": current_adapter,
             "trained": True,
+            "eval": eval_metrics,
         })
 
     # ── Summary ──────────────────────────────────────────────────────────────
@@ -266,6 +324,7 @@ def flywheel(
 
     # Save log
     log_path = Path(adapter_dir) / "flywheel_log.json"
+    log_path.parent.mkdir(parents=True, exist_ok=True)   # ensure dir exists even if no training ran
     with open(log_path, "w") as f:
         json.dump(ROUNDS_LOG, f, indent=2, default=str)
     print(f"  Log saved: {log_path}")

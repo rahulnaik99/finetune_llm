@@ -133,32 +133,105 @@ def build_compact_user(symbol, date_str, tech, fund, capital, history, initial_c
 
     death = round(initial_cap * 0.20)
 
+    # ── Detail blocks: levels, VIX, zones (computed first so HEADLINE can use them) ──
+    lv = tech.get("levels", {}) or {}
+    levels_line = ""
+    if lv:
+        parts = []
+        if "pdh" in lv: parts.append(f"PDH {lv['pdh']}({lv.get('pdh_state','')})")
+        if "pdl" in lv: parts.append(f"PDL {lv['pdl']}({lv.get('pdl_state','')})")
+        if "two_day_high" in lv:
+            b = "broke" if lv.get("two_day_high_broken") else "intact"
+            parts.append(f"2DH {lv['two_day_high']}({b})")
+        if "week_high" in lv: parts.append(f"WkH {lv['week_high']}({lv.get('week_high_state','')})")
+        if "week_low" in lv:  parts.append(f"WkL {lv['week_low']}({lv.get('week_low_state','')})")
+        if parts:
+            levels_line = "LEVELS: " + " | ".join(parts) + "\n"
+
+    vc = tech.get("vix_ctx", {}) or {}
+    vix_line = ""
+    if vc:
+        vix_line = (f"VIX:{vc.get('vix')} | {vc.get('pctile_1y')}pct(1y) | "
+                    f"{vc.get('regime')} | 5d:{vc.get('dir_5d')} | 20dRange:{vc.get('pos_20d')}\n")
+
+    zc = tech.get("zones", {}) or {}
+    zones_line = ""
+    if zc:
+        try:
+            from zones import fmt_zone
+        except Exception:
+            fmt_zone = lambda z: "-"
+        s15, b1h = zc.get("tf_15m", {}), zc.get("tf_1h", {})
+        conf = zc.get("confluence", {}) or {}
+        zparts = [f"15m DZ:{fmt_zone(s15.get('demand'))} SZ:{fmt_zone(s15.get('supply'))}",
+                  f"1h  DZ:{fmt_zone(b1h.get('demand'))} SZ:{fmt_zone(b1h.get('supply'))}"]
+        cf = [k for k in ("demand", "supply") if conf.get(k)]
+        if cf: zparts.append("CONFLUENCE:" + "+".join(cf) + " (15m inside 1h)")
+        zones_line = "ZONES:\n  " + "\n  ".join(zparts) + "\n"
+
+    # ── RELATIVE encoding (scale-free features for cross-stock generalization) ──
+    # Keep raw prices above (for SL/TP math); add % / ATR-multiple distances so the
+    # model learns "2% below EMA200, 1.3 ATR from support" not the literal "119.78".
+    import os as _os
+    rel_on = _os.environ.get("RELATIVE_ENCODING", "1").strip().lower() in ("1", "true", "yes", "on")
+    rel_line = ""
+    if rel_on:
+        atr = atr_approx or 1e-9
+        def _atrmult(level):
+            return None if level in (None, 0) else round((close - level) / atr, 2)
+        ns_mid = (tech.get("nearest_support") or {}).get("mid")
+        nr_mid = (tech.get("nearest_resistance") or {}).get("mid")
+        rel = [
+            f"vsEMA200:{c_vs_200:+.1f}%" if c_vs_200 is not None else "",
+            f"vsEMA50:{_pct(close, e50):+.1f}%" if e50 else "",
+            f"vsVWAP:{c_vs_vwap:+.1f}%" if c_vs_vwap is not None else "",
+            f"ATR%:{round(atr/close*100,2)}%" if close else "",
+            f"toSup:{_atrmult(ns_mid)}ATR" if ns_mid else "",
+            f"toRes:{_atrmult(nr_mid)}ATR" if nr_mid else "",
+            f"5dPos:{pct_pos:.0f}pct",
+        ]
+        rel_line = "REL: " + " | ".join(p for p in rel if p) + "\n"
+
+    # ── HEADLINE: one-line verdict the model anchors to, then the detail blocks ──
+    bias = ("bullish" if (stack or "").startswith("bullish") and (c_vs_vwap or 0) > 0 else
+            "bearish" if (stack or "").startswith("bearish") and (c_vs_vwap or 0) < 0 else "neutral")
+    hl_bits = [f"bias:{bias}", f"trend:{tech.get('trend','-')}"]
+    if lv.get("pdh_state") in ("broke", "rejected"): hl_bits.append(f"PDH:{lv['pdh_state']}")
+    if vc: hl_bits.append(f"VIX:{vc.get('regime')}")
+    if (zc.get("confluence") or {}).get("demand"): hl_bits.append("confluent-demand")
+    if (zc.get("confluence") or {}).get("supply"): hl_bits.append("confluent-supply")
+    headline = "HEADLINE: " + " | ".join(hl_bits) + "\n"
+
     return (
         f"[{symbol} {date_str}]\n"
+        f"{headline}"
         f"C:{close} ({'+' if (day_chg or 0)>=0 else ''}{day_chg}%) | "
         f"5d:{d5_low}-{d5_high} C@{pct_pos:.0f}pct\n"
-        f"ATR:{atr_approx} | Vol:{last_vol/1e6:.1f}M({vol_ratio}×avg) | "
-        f"3d:{'+' if (d3_chg or 0)>=0 else ''}{d3_chg if d3_chg is not None else 0}% | body:{body_r}\n\n"
+        f"ATR:{atr_approx} | Vol:{last_vol/1e6:.1f}M({vol_ratio}x avg) | "
+        f"3d:{'+' if (d3_chg or 0)>=0 else ''}{d3_chg if d3_chg is not None else 0}% | body:{body_r}\n"
+        f"{rel_line}\n"
 
         f"EMA: 50@{e50} {'<' if (e50 or 0)<(e100 or 0) else '>'} "
         f"100@{e100} {'<' if (e100 or 0)<(e200 or 0) else '>'} "
         f"200@{e200} [{stack.split()[0].upper()}]\n"
         f"VWAP:{vwap} C{'+' if (c_vs_vwap or 0)>=0 else ''}{c_vs_vwap}% | "
         f"C vs EMA200:{'+' if (c_vs_200 or 0)>=0 else ''}{c_vs_200}%\n"
-        f"Trend:{tech.get('trend','—')} | "
-        f"Struct:{','.join(tech.get('structure',[]) or ['—'])}\n\n"
+        f"Trend:{tech.get('trend','-')} | "
+        f"Struct:{','.join(tech.get('structure',[]) or ['-'])}\n\n"
 
-        f"S:{sup_str}  (nearest {(dist_s if dist_s is not None else 0):+.1f}%)" + (f"\n" if sup_str != "—" else " —\n") +
+        f"S:{sup_str}  (nearest {(dist_s if dist_s is not None else 0):+.1f}%)" + ("\n" if sup_str != "-" else " -\n") +
         f"R:{res_str}  (nearest {'+' if (dist_r or 0)>=0 else ''}{dist_r if dist_r is not None else 0}%)" +
-        (f"\n" if res_str != "—" else " —\n") +
+        ("\n" if res_str != "-" else " -\n") +
         f"SH:{sh_str} | SL:{sl_str}\n"
+        f"{levels_line}"
+        f"{vix_line}"
+        f"{zones_line}"
         f"{fund_line}\n\n"
 
         f"HISTORY:\n{hist_block}\n\n"
 
         f"CAP:{capital:.0f} (death<{death})"
     )
-
 
 def build_compact_post_user(trade):
     """Compact post-trade prompt."""

@@ -1,160 +1,196 @@
 """
 evaluate.py
 ───────────
-Evaluates the fine-tuned adapter on the held-out test set.
+Evaluation harness for the fine-tuned trading model. Two layers:
 
-Metrics:
-  1. JSON validity rate       — does the model always output parseable JSON?
-  2. Schema accuracy          — are required fields present with correct types?
-  3. Action distribution      — BUY/SELL/HOLD balance
-  4. Reasoning quality score  — heuristic: does reasoning cite numbers?
-  5. Back-test P&L            — run the model's decisions against real forward data
+  A) MODEL-QUALITY (no market replay) — on the held-out TEST jsonl:
+       - json_validity   : fraction that parse as JSON
+       - schema_ok       : fraction with all required keys
+       - reasoning_ok    : fraction with non-empty reasoning
+       - features_used_ok: fraction that include a non-empty features_used list
+       - action_match    : agreement with the reference (teacher) action
+
+  B) TRADING METRICS (pure math) — from realized P&L of a set of trades:
+       - win_rate, avg_win, avg_loss, expectancy, profit_factor,
+         sharpe (per-trade), max_drawdown_pct
+
+The TEST set is produced by the walk-forward split (SPLIT_MODE=time), so these
+numbers reflect performance on dates the model never trained on.
 
 Usage:
-    python evaluate.py \
-        --adapter output/nemotron-trading/final_adapter \
-        --test    data/trading_test.jsonl
+  # quick self-check of the harness (uses the stored answers as the "model")
+  python evaluate.py --test data/rounds/round_01/trading_test.jsonl
+
+  # evaluate a fine-tuned MLX adapter/fused model
+  python evaluate.py --test data/rounds/round_01/trading_test.jsonl \
+      --model output/adapters/round_01/fused_model
+
+  # trading metrics from the test set's recorded outcomes
+  python evaluate.py --test data/rounds/round_01/trading_test.jsonl --pnl-from-meta
 """
-import argparse, json, re
+from __future__ import annotations
+import argparse, json, math
 from pathlib import Path
 
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from peft import PeftModel
+REQUIRED_KEYS = ["action", "stop_loss", "take_profit", "risk_reward", "reasoning", "confidence"]
 
 
-# ── Load fine-tuned model ────────────────────────────────────────────────────
-def load_model(base_model: str, adapter_path: str):
-    """Load base model + LoRA adapter in inference mode."""
-    # Try Unsloth first
-    try:
-        from unsloth import FastLanguageModel
-        model, tokenizer = FastLanguageModel.from_pretrained(
-            model_name=adapter_path,        # adapter_path must contain adapter_config.json
-            max_seq_length=2048,
-            dtype=None,
-            load_in_4bit=True,
-        )
-        FastLanguageModel.for_inference(model)
-        print(f"Loaded with Unsloth: {adapter_path}")
-        return model, tokenizer
-    except Exception:
-        pass
-
-    tokenizer = AutoTokenizer.from_pretrained(adapter_path, trust_remote_code=True)
-    base = AutoModelForCausalLM.from_pretrained(
-        base_model,
-        torch_dtype=torch.bfloat16,
-        device_map="auto",
-        trust_remote_code=True,
-    )
-    model = PeftModel.from_pretrained(base, adapter_path)
-    model.eval()
-    print(f"Loaded with PEFT: {adapter_path}")
-    return model, tokenizer
-
-
-# ── Inference helper ─────────────────────────────────────────────────────────
-def generate(model, tokenizer, messages: list[dict], max_new_tokens: int = 512) -> str:
-    text = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
-    )
-    inputs = tokenizer(text, return_tensors="pt").to(model.device)
-    with torch.no_grad():
-        out = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            temperature=0.1,
-            do_sample=True,
-            pad_token_id=tokenizer.eos_token_id,
-        )
-    # Return only the newly generated tokens
-    new_tokens = out[0][inputs["input_ids"].shape[1]:]
-    return tokenizer.decode(new_tokens, skip_special_tokens=True)
-
-
-# ── Metric helpers ────────────────────────────────────────────────────────────
-REQUIRED_PRE_FIELDS  = {"action", "quantity", "stop_loss", "take_profit", "reasoning"}
-REQUIRED_POST_FIELDS = {"outcome", "lesson_learned", "strategy_adjustment"}
-
-def check_schema(text: str, required: set) -> tuple[bool, bool, dict | None]:
-    """Returns (json_valid, schema_ok, parsed)."""
-    # Extract JSON from markdown if needed
+# ── parsing helpers ──────────────────────────────────────────────────────────
+def _parse_json_block(text: str) -> dict:
+    if not text:
+        return {}
+    import re
     m = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
-    if m: text = m.group(1)
+    if m:
+        text = m.group(1)
     try:
-        parsed = json.loads(text.strip())
+        return json.loads(text.strip())
     except Exception:
-        return False, False, None
-    schema_ok = required.issubset(parsed.keys())
-    return True, schema_ok, parsed
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if m:
+            try:
+                return json.loads(m.group())
+            except Exception:
+                pass
+    return {}
 
-def reasoning_cites_numbers(reasoning: str) -> bool:
-    """Heuristic: good reasoning should mention at least one price/percentage."""
-    return bool(re.search(r"\d+\.\d+|\d+%|EMA\d+|RSI", reasoning or ""))
+
+def _messages(ex):
+    sys_c = next((m["content"] for m in ex["messages"] if m["role"] == "system"), "")
+    usr_c = next((m["content"] for m in ex["messages"] if m["role"] == "user"), "")
+    asst  = next((m["content"] for m in ex["messages"] if m["role"] == "assistant"), "")
+    return sys_c, usr_c, asst
 
 
-# ── Main evaluation ────────────────────────────────────────────────────────────
-def evaluate(adapter_path: str, test_jsonl: str, base_model: str) -> dict:
-    model, tokenizer = load_model(base_model, adapter_path)
+# ── A) model-quality ─────────────────────────────────────────────────────────
+def evaluate_model_quality(test_path: str, generate_fn) -> dict:
+    """
+    generate_fn(system, user) -> model's raw text answer.
+    For a self-check, pass a function that returns the stored assistant text.
+    """
+    rows = [json.loads(l) for l in open(test_path) if l.strip()]
+    n = len(rows)
+    jv = sch = rz = fu = am = 0
+    for ex in rows:
+        sys_c, usr_c, ref_txt = _messages(ex)
+        pred = generate_fn(sys_c, usr_c)
+        d = _parse_json_block(pred)
+        ref = _parse_json_block(ref_txt)
+        if d: jv += 1
+        if d and all(k in d for k in REQUIRED_KEYS): sch += 1
+        if d.get("reasoning", "").strip() not in ("", "—"): rz += 1
+        if isinstance(d.get("features_used"), list) and d["features_used"]: fu += 1
+        if d.get("action") and d.get("action") == ref.get("action"): am += 1
+    pct = lambda x: round(100 * x / n, 1) if n else 0.0
+    return {"n": n, "json_validity": pct(jv), "schema_ok": pct(sch),
+            "reasoning_ok": pct(rz), "features_used_ok": pct(fu),
+            "action_match": pct(am)}
 
-    test_examples = []
-    with open(test_jsonl) as f:
-        for line in f:
-            test_examples.append(json.loads(line))
 
-    print(f"Evaluating {len(test_examples)} test examples...")
+# ── B) trading metrics ───────────────────────────────────────────────────────
+def trading_metrics(pnls: list[float]) -> dict:
+    pnls = [float(p) for p in pnls if p is not None]
+    n = len(pnls)
+    if n == 0:
+        return {"n": 0}
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
+    gross_win = sum(wins)
+    gross_loss = -sum(losses)
+    mean = sum(pnls) / n
+    var = sum((p - mean) ** 2 for p in pnls) / n
+    std = math.sqrt(var)
+    sharpe = round(mean / std, 2) if std > 0 else 0.0   # per-trade Sharpe
 
-    results = {
-        "total": len(test_examples),
-        "json_valid": 0, "schema_ok": 0,
-        "reasoning_quality": 0,
-        "action_dist": {"BUY": 0, "SELL": 0, "HOLD": 0},
-        "examples": [],
+    # max drawdown on the cumulative P&L curve
+    cum, peak, mdd = 0.0, 0.0, 0.0
+    for p in pnls:
+        cum += p
+        peak = max(peak, cum)
+        mdd = min(mdd, cum - peak)
+
+    return {
+        "n": n,
+        "win_rate": round(100 * len(wins) / n, 1),
+        "avg_win": round(gross_win / len(wins), 2) if wins else 0.0,
+        "avg_loss": round(-gross_loss / len(losses), 2) if losses else 0.0,
+        "expectancy": round(mean, 2),                      # avg P&L per trade
+        "profit_factor": round(gross_win / gross_loss, 2) if gross_loss > 0 else float("inf"),
+        "sharpe_per_trade": sharpe,
+        "total_pnl": round(sum(pnls), 2),
+        "max_drawdown": round(mdd, 2),
     }
 
-    for i, ex in enumerate(test_examples):
-        messages = ex["messages"]
-        # Remove the assistant turn — we'll generate it
-        prompt_messages = [m for m in messages if m["role"] != "assistant"]
-        expected = messages[-1]["content"] if messages[-1]["role"] == "assistant" else ""
 
-        generated = generate(model, tokenizer, prompt_messages)
+def pnls_from_test_meta(test_path: str) -> list[float]:
+    """Realized P&L recorded in each test example's _meta (pre_trade rows only)."""
+    out = []
+    for l in open(test_path):
+        if not l.strip():
+            continue
+        ex = json.loads(l)
+        meta = ex.get("_meta", {})
+        if meta.get("type") == "pre_trade" and meta.get("pnl") is not None:
+            out.append(meta["pnl"])
+    return out
 
-        # Detect example type from system prompt
-        is_pre = "action" in (expected or "")
-        required = REQUIRED_PRE_FIELDS if is_pre else REQUIRED_POST_FIELDS
-        json_ok, schema_ok, parsed = check_schema(generated, required)
 
-        results["json_valid"] += int(json_ok)
-        results["schema_ok"]  += int(schema_ok)
+# ── generate functions ───────────────────────────────────────────────────────
+def stored_answer_generate(system, user):
+    """Self-check: the 'model' just echoes the reference — harness sanity test."""
+    return None   # replaced per-row below; see _selfcheck
 
-        if parsed and is_pre:
-            action = parsed.get("action", "HOLD")
-            results["action_dist"][action] = results["action_dist"].get(action, 0) + 1
-            if reasoning_cites_numbers(parsed.get("reasoning", "")):
-                results["reasoning_quality"] += 1
 
-        if i < 3:   # print first 3 examples
-            print(f"\n--- Example {i+1} ---")
-            print(f"Expected:  {expected[:200]}...")
-            print(f"Generated: {generated[:200]}...")
-            print(f"JSON valid: {json_ok}  Schema ok: {schema_ok}")
+def mlx_generate_factory(model_path: str):
+    """Return a generate_fn backed by an MLX fused model / adapter."""
+    from mlx_lm import load, generate
+    model, tok = load(model_path)
+    def _gen(system, user):
+        msgs = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        prompt = tok.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
+        return generate(model, tok, prompt=prompt, max_tokens=256, verbose=False)
+    return _gen
 
-    n = results["total"] or 1
-    print(f"\n{'='*60}")
-    print(f"  JSON validity:      {results['json_valid']}/{n} = {results['json_valid']/n:.1%}")
-    print(f"  Schema accuracy:    {results['schema_ok']}/{n} = {results['schema_ok']/n:.1%}")
-    print(f"  Reasoning quality:  {results['reasoning_quality']}/{n}")
-    print(f"  Action dist:        {results['action_dist']}")
-    print(f"{'='*60}")
-    return results
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--test", required=True, help="held-out test JSONL")
+    p.add_argument("--model", default=None, help="MLX fused model / adapter path")
+    p.add_argument("--pnl-from-meta", action="store_true",
+                   help="also report trading metrics from the test set's recorded P&L")
+    args = p.parse_args()
+
+    if args.model:
+        gen = mlx_generate_factory(args.model)
+        print(f"Evaluating model: {args.model}")
+    else:
+        # self-check: echo the stored assistant so the harness reports ~100%
+        rows = [json.loads(l) for l in open(args.test) if l.strip()]
+        answers = {}
+        for ex in rows:
+            _, usr, asst = _messages(ex)
+            answers[usr] = asst
+        gen = lambda s, u: answers.get(u, "")
+        print("No --model given → harness self-check (echoes stored answers)")
+
+    q = evaluate_model_quality(args.test, gen)
+    print("\nMODEL QUALITY (held-out test):")
+    for k, v in q.items():
+        print(f"  {k:18s}: {v}")
+
+    if args.pnl_from_meta:
+        tm = trading_metrics(pnls_from_test_meta(args.test))
+        print("\nTRADING METRICS (recorded outcomes on test dates):")
+        for k, v in tm.items():
+            print(f"  {k:18s}: {v}")
+
+    out = {"model_quality": q}
+    if args.pnl_from_meta:
+        out["trading_metrics"] = trading_metrics(pnls_from_test_meta(args.test))
+    Path("metrics").mkdir(exist_ok=True)
+    Path("metrics/eval_results.json").write_text(json.dumps(out, indent=2))
+    print("\nWrote metrics/eval_results.json")
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser()
-    p.add_argument("--adapter",    required=True)
-    p.add_argument("--test",       required=True)
-    p.add_argument("--base_model", default="nvidia/Nemotron-Nano-4B-Instruct")
-    args = p.parse_args()
-    evaluate(args.adapter, args.test, args.base_model)
+    main()

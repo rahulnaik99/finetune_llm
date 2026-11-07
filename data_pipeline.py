@@ -133,6 +133,7 @@ def build_pre_trade_example(trade: dict, prev_trades: list[dict]) -> dict | None
             "type": "pre_trade",
             "episode": trade["episode"],
             "symbol": trade["symbol"],
+            "date": trade["decision_date"],
             "pnl": trade["pnl"],
             "exit_reason": trade["exit_reason"],
         },
@@ -173,6 +174,7 @@ def build_post_trade_example(trade: dict) -> dict | None:
             "type": "post_trade",
             "episode": trade["episode"],
             "symbol": trade["symbol"],
+            "date": trade["decision_date"],
             "pnl": trade["pnl"],
         },
     }
@@ -206,6 +208,79 @@ def quality_filter(example: dict, min_confidence: float, min_rr: float) -> bool:
     return True
 
 
+def _assistant_json(example: dict) -> dict:
+    """Parse the assistant message JSON from a training example (or {})."""
+    try:
+        for m in example.get("messages", []):
+            if m.get("role") == "assistant":
+                return json.loads(m["content"])
+    except Exception:
+        pass
+    return {}
+
+
+def _dedup_key(example: dict) -> tuple:
+    """
+    Near-duplicate signature: action + coarse-binned decision fields. Two setups
+    that round to the same bucket are treated as duplicates (keep one).
+    """
+    d = _assistant_json(example)
+    def b(x, step):
+        try:
+            return round(float(x) / step) * step
+        except Exception:
+            return None
+    return (
+        d.get("action"),
+        b(d.get("stop_loss"), 1.0),
+        b(d.get("take_profit"), 1.0),
+        b(d.get("risk_reward"), 0.25),
+        b(d.get("confidence"), 0.1),
+    )
+
+
+def balance_and_dedup(examples: list[dict],
+                      dedup: bool = True,
+                      balance: bool = True,
+                      max_ratio: float = 1.5,
+                      seed: int = 42) -> list[dict]:
+    """
+    De-duplicate near-identical examples and balance BUY vs SELL so one side
+    cannot dominate (the cause of the 'always-HOLD / loss→0' memorisation).
+    Nothing is summarised away — only redundant/over-represented rows are trimmed.
+    """
+    import random as _r
+    _r.seed(seed)
+
+    # 1. De-dup by coarse decision signature (keep first occurrence)
+    if dedup:
+        seen, unique = set(), []
+        for e in examples:
+            k = _dedup_key(e)
+            if k in seen:
+                continue
+            seen.add(k)
+            unique.append(e)
+        print(f"After de-dup: {len(unique)} examples (removed {len(examples)-len(unique)} near-dupes)")
+        examples = unique
+
+    # 2. Balance BUY vs SELL (cap the majority at max_ratio × minority)
+    if balance:
+        buys  = [e for e in examples if _assistant_json(e).get("action") == "BUY"]
+        sells = [e for e in examples if _assistant_json(e).get("action") == "SELL"]
+        other = [e for e in examples if _assistant_json(e).get("action") not in ("BUY", "SELL")]
+        if buys and sells:
+            minority = min(len(buys), len(sells))
+            cap = int(minority * max_ratio)
+            _r.shuffle(buys); _r.shuffle(sells)
+            buys, sells = buys[:cap], sells[:cap]
+            balanced = buys + sells + other
+            _r.shuffle(balanced)
+            print(f"After balance: {len(balanced)} (BUY {len(buys)} / SELL {len(sells)} / other {len(other)})")
+            return balanced
+    return examples
+
+
 def build_dataset(
     db_path: str,
     out_path: str,
@@ -214,7 +289,15 @@ def build_dataset(
     val_ratio: float = 0.1,
     test_ratio: float = 0.1,
     seed: int = 42,
+    do_balance: bool | None = None,
+    do_dedup: bool | None = None,
 ) -> dict[str, int]:
+    import os
+    if do_balance is None:
+        do_balance = os.environ.get("BALANCE_DATA", "1").strip().lower() in ("1", "true", "yes", "on")
+    if do_dedup is None:
+        do_dedup = os.environ.get("DEDUP_DATA", "1").strip().lower() in ("1", "true", "yes", "on")
+
     trades = load_trades(db_path)
     print(f"Loaded {len(trades)} trades from {db_path}")
 
@@ -232,21 +315,36 @@ def build_dataset(
     filtered = [e for e in examples if quality_filter(e, min_confidence, min_rr)]
     print(f"After quality filter: {len(filtered)} examples")
 
+    # Balance + de-dup (fixes memorisation collapse; adds diversity)
+    filtered = balance_and_dedup(filtered, dedup=do_dedup, balance=do_balance, seed=seed)
+
     if len(filtered) < 50:
         print("⚠  WARNING: < 50 examples is very few for fine-tuning.")
         print("   Run more simulation episodes across more symbols/dates.")
 
-    # Shuffle + split
-    random.seed(seed)
-    random.shuffle(filtered)
+    # ── Split: 'time' = walk-forward (train=earliest, test=latest) or 'random' ──
+    split_mode = os.environ.get("SPLIT_MODE", "time").strip().lower()
     n = len(filtered)
     n_test = max(1, int(n * test_ratio))
     n_val  = max(1, int(n * val_ratio))
-    splits = {
-        "train": filtered[n_test + n_val:],
-        "val":   filtered[n_test:n_test + n_val],
-        "test":  filtered[:n_test],
-    }
+    if split_mode == "time":
+        # Chronological: earliest dates train, latest dates are the (future) test.
+        filtered.sort(key=lambda e: (e.get("_meta", {}).get("date") or "", e.get("_meta", {}).get("episode", 0)))
+        splits = {
+            "train": filtered[: n - n_val - n_test],
+            "val":   filtered[n - n_val - n_test: n - n_test],
+            "test":  filtered[n - n_test:],
+        }
+        print(f"Split=time (walk-forward): train<=val<=test by date")
+    else:
+        random.seed(seed)
+        random.shuffle(filtered)
+        splits = {
+            "train": filtered[n_test + n_val:],
+            "val":   filtered[n_test:n_test + n_val],
+            "test":  filtered[:n_test],
+        }
+        print("Split=random")
 
     # Write JSONL files
     out_dir = Path(out_path).parent

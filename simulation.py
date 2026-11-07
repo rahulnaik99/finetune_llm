@@ -59,6 +59,21 @@ OLLAMA_URL      = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat"
 OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL", "nemotron-bolt-e4b-16k")
 DB_PATH         = os.environ.get("DB_PATH", "trading_agent.db")
 
+# ── Price data source: "csv" (local file, offline) or "yfinance" (online) ──
+DATA_SOURCE = os.environ.get("DATA_SOURCE", "yfinance").strip().lower()
+CSV_DIR     = os.environ.get("CSV_DIR", "data/prices")   # looks for {CSV_DIR}/{SYMBOL}.csv
+CSV_PATH    = os.environ.get("CSV_PATH", "")             # explicit single file (overrides CSV_DIR)
+
+# ── Fundamentals source: "xbrl" (official SEBI filings) or "yfinance" ───────
+FUNDAMENTALS_SOURCE = os.environ.get("FUNDAMENTALS_SOURCE", "yfinance").strip().lower()
+XBRL_DIR            = os.environ.get("XBRL_DIR", "data/fundamentals")  # {XBRL_DIR}/{SYMBOL}/*.xml
+
+# ── India VIX (volatility regime context) — optional local CSV ──────────────
+VIX_CSV      = os.environ.get("VIX_CSV", "")          # e.g. data/prices/INDIAVIX.csv (no volume needed)
+VIX_LOW      = float(os.environ.get("VIX_LOW", 13))   # regime thresholds (India VIX)
+VIX_NORMAL   = float(os.environ.get("VIX_NORMAL", 18))
+VIX_ELEVATED = float(os.environ.get("VIX_ELEVATED", 25))
+
 
 # ════════════════════════════════════════════════════════════════════
 #  LLM BACKEND SWITCH
@@ -170,7 +185,15 @@ def init_db() -> None:
 
 # ════════════════════════════════════════════════════════════════════
 #  DATA FETCHER — strict as_of cutoff (MultiIndex-safe)
+#  Downloads each symbol's FULL history ONCE and caches it, then slices
+#  per episode. This avoids yfinance rate-limiting ("possibly delisted"
+#  empty responses) that happens when you call download() 100s of times.
 # ════════════════════════════════════════════════════════════════════
+import time as _time
+
+_PRICE_CACHE: dict[str, pd.DataFrame] = {}
+
+
 def _flatten_cols(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = [c[0].lower() for c in df.columns]
@@ -179,28 +202,148 @@ def _flatten_cols(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _download_with_retry(ticker: str, start: str, end: str, retries: int = 4) -> pd.DataFrame:
+    """yfinance download with exponential backoff — handles transient rate limits."""
+    last_err = None
+    for attempt in range(1, retries + 1):
+        try:
+            df = yf.download(ticker, start=start, end=end, interval="1d",
+                             progress=False, auto_adjust=True)
+            if df is not None and not df.empty:
+                return df
+            last_err = "empty response"
+        except Exception as e:
+            last_err = str(e)
+        if attempt < retries:
+            wait = 2 ** attempt  # 2s, 4s, 8s
+            print(f"    [yfinance retry {attempt}/{retries} for {ticker}: {last_err} - waiting {wait}s]")
+            _time.sleep(wait)
+    raise ValueError(f"No candle data for {ticker} after {retries} tries ({last_err})")
+
+
+def _load_csv_raw(path: Path) -> pd.DataFrame:
+    """
+    Load a CSV into a timestamped OHLCV DataFrame (NOT resampled). Works for
+    1-minute or daily files. Volume optional (indices like VIX have none).
+    """
+    if not path.exists():
+        raise FileNotFoundError(
+            f"CSV not found: {path}. Set CSV_PATH/CSV_DIR or DATA_SOURCE=yfinance."
+        )
+    df = pd.read_csv(path)
+    df.columns = [str(c).strip().lower() for c in df.columns]
+    dt_col = next((c for c in df.columns if c in ("datetime", "date", "time", "timestamp")), None)
+    if dt_col is None:
+        dt_col = next((c for c in df.columns if ("date" in c or "time" in c)), df.columns[0])
+    df[dt_col] = pd.to_datetime(df[dt_col], errors="coerce", dayfirst=True, format="mixed")
+    df = df.dropna(subset=[dt_col]).set_index(dt_col).sort_index()
+    rename = {"o": "open", "h": "high", "l": "low", "c": "close", "v": "volume",
+              "vol": "volume", "adj close": "close", "adj_close": "close"}
+    df = df.rename(columns=rename)
+    need = ["open", "high", "low", "close"]
+    missing = [c for c in need if c not in df.columns]
+    if missing:
+        raise ValueError(f"CSV {path} missing columns {missing}. Found: {list(df.columns)}")
+    if "volume" not in df.columns:
+        df["volume"] = 0.0
+    df = df[need + ["volume"]].apply(pd.to_numeric, errors="coerce").dropna(subset=need)
+    df["volume"] = df["volume"].fillna(0.0)
+    return df
+
+
+def _resample_ohlcv(df: pd.DataFrame, rule: str) -> pd.DataFrame:
+    out = df.resample(rule).agg({
+        "open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum",
+    }).dropna(subset=["open", "high", "low", "close"])
+    return out
+
+
+_RAW_CACHE: dict[str, pd.DataFrame] = {}
+
+
+def _get_raw_history(symbol: str) -> pd.DataFrame:
+    """Read the symbol's CSV ONCE (raw timestamps, minute or daily), cache it."""
+    if symbol in _RAW_CACHE:
+        return _RAW_CACHE[symbol]
+    path = Path(CSV_PATH) if CSV_PATH else Path(CSV_DIR) / f"{symbol}.csv"
+    raw = _load_csv_raw(path)
+    _RAW_CACHE[symbol] = raw
+    print(f"  Loaded {len(raw)} raw bars for {symbol} from {path}")
+    return raw
+
+
+def _load_csv_history(symbol: str) -> pd.DataFrame:
+    """Daily OHLCV for a symbol, derived from the raw cache (minute or daily)."""
+    daily = _resample_ohlcv(_get_raw_history(symbol), "1D")
+    daily.index = pd.to_datetime(daily.index.date)   # date-at-midnight for exact as_of slicing
+    return daily
+
+
+def get_intraday(symbol: str, as_of_date: str, rule: str, n_bars: int = 150) -> pd.DataFrame:
+    """
+    Resample the raw minute data to `rule` (e.g. '15min', '1h'), keep only bars
+    on/before as_of_date, return the last n_bars. Empty if the source is daily.
+    """
+    raw = _get_raw_history(symbol)
+    cutoff = pd.Timestamp(as_of_date) + pd.Timedelta(days=1)   # include the whole as_of day
+    sliced = raw[raw.index < cutoff]
+    if sliced.empty:
+        return pd.DataFrame()
+    tf = _resample_ohlcv(sliced, rule)
+    return tf.tail(n_bars)
+
+
+def _get_full_history(symbol: str) -> pd.DataFrame:
+    """Load the symbol's entire DAILY history ONCE (CSV or yfinance), cache, reuse."""
+    if symbol in _PRICE_CACHE:
+        return _PRICE_CACHE[symbol]
+
+    if DATA_SOURCE == "csv":
+        df = _load_csv_history(symbol)
+        src = f"CSV ({CSV_PATH or Path(CSV_DIR)/ (symbol+'.csv')})"
+    else:
+        df = _download_with_retry(f"{symbol}.NS", "2015-01-01",
+                                  (pd.Timestamp.today() + pd.Timedelta(days=1)).strftime("%Y-%m-%d"))
+        df = _flatten_cols(df)
+        src = "yfinance (single download)"
+
+    _PRICE_CACHE[symbol] = df
+    print(f"  Cached {len(df)} daily bars for {symbol} from {src}")
+    return df
+
+
 def get_candles(symbol: str, as_of_date: str, lookback_days: int = LOOKBACK_DAYS) -> pd.DataFrame:
-    end   = pd.Timestamp(as_of_date) + pd.Timedelta(days=1)
-    start = pd.Timestamp(as_of_date) - pd.Timedelta(days=lookback_days * 2 + 10)
-    df = yf.download(f"{symbol}.NS", start=start.strftime("%Y-%m-%d"),
-                     end=end.strftime("%Y-%m-%d"), interval="1d",
-                     progress=False, auto_adjust=True)
+    hist = _get_full_history(symbol)
+    df = hist[hist.index <= pd.Timestamp(as_of_date)].tail(lookback_days).copy()
     if df.empty:
-        raise ValueError(f"No candle data for {symbol}")
-    df = df[df.index <= pd.Timestamp(as_of_date)].tail(lookback_days).copy()
-    return _flatten_cols(df)
+        raise ValueError(f"No candle data for {symbol} on/before {as_of_date}")
+    return df
 
 
 def get_forward_candles(symbol: str, from_date: str, n: int = MAX_HOLD_DAYS) -> pd.DataFrame:
-    start = pd.Timestamp(from_date) + pd.Timedelta(days=1)
-    end   = start + pd.Timedelta(days=n * 3 + 5)
-    df = yf.download(f"{symbol}.NS", start=start.strftime("%Y-%m-%d"),
-                     end=end.strftime("%Y-%m-%d"), interval="1d",
-                     progress=False, auto_adjust=True)
-    if df.empty:
-        return pd.DataFrame()
-    df = df[df.index > pd.Timestamp(from_date)].copy()
-    return _flatten_cols(df).head(n)
+    hist = _get_full_history(symbol)
+    df = hist[hist.index > pd.Timestamp(from_date)].head(n).copy()
+    return df
+
+
+def compute_zones(symbol: str, as_of_date: str) -> dict:
+    """
+    Detect demand/supply zones on 15-min (short) and 1-hour (big) timeframes
+    from the raw minute data, no look-ahead. Returns {} if the source is daily
+    (no intraday data). Confluence = a 15m zone sitting inside a 1h zone.
+    """
+    try:
+        from zones import detect_zones, nearest_zones, confluence
+    except Exception:
+        return {}
+    tf15 = get_intraday(symbol, as_of_date, "15min", 160)
+    tf1h = get_intraday(symbol, as_of_date, "1h", 160)
+    if (tf15 is None or tf15.empty) and (tf1h is None or tf1h.empty):
+        return {}   # daily-only source — no intraday zones
+    price = float((tf15 if not tf15.empty else tf1h)["close"].iloc[-1])
+    near15 = nearest_zones(detect_zones(tf15, impulse_mult=3.0), price) if not tf15.empty else {}
+    near1h = nearest_zones(detect_zones(tf1h, impulse_mult=3.0), price) if not tf1h.empty else {}
+    return {"tf_15m": near15, "tf_1h": near1h, "confluence": confluence(near15, near1h)}
 
 
 def _quarter_key(date_str: str) -> str:
@@ -209,6 +352,20 @@ def _quarter_key(date_str: str) -> str:
 
 
 def get_fundamentals(symbol: str, as_of_date: str) -> dict:
+    # ── XBRL source (official SEBI filings) — preferred when configured ──────
+    if FUNDAMENTALS_SOURCE == "xbrl":
+        try:
+            from fundamentals_xbrl import get_fundamentals_xbrl
+            f = get_fundamentals_xbrl(symbol, as_of_date, XBRL_DIR)
+            if f:
+                # map to the keys the prompt builder expects (+ keep the rich ones)
+                f.setdefault("net_income", f.get("pat"))
+                f.setdefault("quarter_key", _quarter_key(f.get("quarter_end", as_of_date)))
+                return f
+            print(f"  [xbrl] no filing <= {as_of_date} for {symbol}; falling back to yfinance")
+        except Exception as e:
+            print(f"  [xbrl error: {e}] falling back to yfinance")
+
     qkey = _quarter_key(as_of_date)
     with sqlite3.connect(DB_PATH) as con:
         row = con.execute("SELECT data_json FROM fundamental_cache WHERE symbol=? AND as_of_quarter=?",
@@ -296,6 +453,64 @@ def _cluster_zones(pivots, kind, bw=0.008):
     return zones
 
 
+_VIX_CACHE = {}
+
+
+def _get_vix_history():
+    """Load the India VIX daily series from VIX_CSV once, cached. None if unset/missing."""
+    if not VIX_CSV:
+        return None
+    if "vix" in _VIX_CACHE:
+        return _VIX_CACHE["vix"]
+    try:
+        df = _load_vix_csv(Path(VIX_CSV))
+        _VIX_CACHE["vix"] = df
+        print(f"  Cached {len(df)} daily VIX bars from {VIX_CSV}")
+    except Exception as e:
+        print(f"  [VIX load failed: {e}] — continuing without VIX")
+        df = None
+        _VIX_CACHE["vix"] = None
+    return df
+
+
+def _load_vix_csv(path: Path) -> pd.DataFrame:
+    """Load a VIX CSV (no volume needed) → daily close series. Reuses the OHLCV loader rules."""
+    global CSV_PATH
+    _saved = CSV_PATH
+    CSV_PATH = str(path)
+    try:
+        return _load_csv_history("__VIX__")   # CSV_PATH override makes symbol irrelevant
+    finally:
+        CSV_PATH = _saved
+
+
+def vix_context(as_of: str) -> dict:
+    """
+    VIX regime context as of a date (no look-ahead). Returns {} if no VIX data.
+    Fields: level, 1y percentile, regime bucket, 5-day direction, 20-day range position.
+    """
+    hist = _get_vix_history()
+    if hist is None or hist.empty:
+        return {}
+    s = hist["close"][hist.index <= pd.Timestamp(as_of)]
+    if len(s) < 2:
+        return {}
+    level = float(s.iloc[-1])
+    yr = s.tail(252)
+    pctile = round(float((yr < level).mean()) * 100)
+    win20 = s.tail(20)
+    lo, hi = float(win20.min()), float(win20.max())
+    pos20 = ("top" if hi > lo and (level - lo) / (hi - lo) > 0.66 else
+             "bottom" if hi > lo and (level - lo) / (hi - lo) < 0.33 else "mid")
+    chg5 = level - float(s.iloc[-6]) if len(s) >= 6 else 0.0
+    direction = "rising" if chg5 > 0.3 else "falling" if chg5 < -0.3 else "flat"
+    regime = ("LOW" if level < VIX_LOW else
+              "NORMAL" if level < VIX_NORMAL else
+              "ELEVATED" if level < VIX_ELEVATED else "EXTREME")
+    return {"vix": round(level, 2), "pctile_1y": pctile, "regime": regime,
+            "dir_5d": direction, "pos_20d": pos20}
+
+
 def compute_technicals(df: pd.DataFrame) -> dict:
     close, high, low, vol = df["close"], df["high"], df["low"], df["volume"]
     cur = float(close.iloc[-1])
@@ -322,6 +537,9 @@ def compute_technicals(df: pd.DataFrame) -> dict:
               .assign(date=lambda d: d["date"].astype(str)).round(2)
               .to_dict(orient="records"))
 
+    # ── Level-break features (PDH/PDL, 2-day, weekly) + broke/held flags ────
+    levels = _level_breaks(df, cur)
+
     return {
         "close": cur, "ema_50": round(e50, 2), "ema_100": round(e100, 2),
         "ema_200": round(e200, 2), "vwap": round(vwap, 2), "ema_stack": stack,
@@ -334,8 +552,52 @@ def compute_technicals(df: pd.DataFrame) -> dict:
                         for t, d, p in pivots if t == "high"][-3:],
         "swing_lows": [{"date": str(d.date()), "price": round(p, 2)}
                        for t, d, p in pivots if t == "low"][-3:],
+        "levels": levels,
         "recent_candles": recent,
     }
+
+
+def _level_breaks(df: pd.DataFrame, cur: float) -> dict:
+    """
+    Compute previous-day / 2-day / weekly high-low reference levels and whether
+    TODAY (last bar) broke above, got rejected at, lost, or held each level.
+    `df` is daily candles up to and including the as_of day (last row = today).
+    """
+    out = {}
+    if len(df) < 2:
+        return out
+    today = df.iloc[-1]
+    th, tl = float(today["high"]), float(today["low"])
+
+    # Previous day
+    pdh = float(df.iloc[-2]["high"]); pdl = float(df.iloc[-2]["low"])
+    out["pdh"] = round(pdh, 2); out["pdl"] = round(pdl, 2)
+    out["pdh_state"] = ("broke"   if cur > pdh else
+                        "rejected" if th >= pdh and cur < pdh else "below")
+    out["pdl_state"] = ("lost"    if cur < pdl else
+                        "held"     if tl <= pdl and cur > pdl else "above")
+
+    # 2-day (two sessions before today)
+    if len(df) >= 3:
+        w = df.iloc[-3:-1]
+        d2h = float(w["high"].max()); d2l = float(w["low"].min())
+        out["two_day_high"] = round(d2h, 2); out["two_day_low"] = round(d2l, 2)
+        out["two_day_high_broken"] = cur > d2h
+        out["two_day_low_broken"]  = cur < d2l
+
+    # Weekly: resample to completed weeks, use the last FULLY completed week
+    try:
+        wk = df.resample("1W").agg({"high": "max", "low": "min"}).dropna()
+        if len(wk) >= 2:
+            pwh = float(wk.iloc[-2]["high"]); pwl = float(wk.iloc[-2]["low"])
+            out["week_high"] = round(pwh, 2); out["week_low"] = round(pwl, 2)
+            out["week_high_state"] = ("broke" if cur > pwh else
+                                      "rejected" if th >= pwh and cur < pwh else "below")
+            out["week_low_state"]  = ("lost"  if cur < pwl else
+                                      "held"  if tl <= pwl and cur > pwl else "above")
+    except Exception:
+        pass
+    return out
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -343,7 +605,13 @@ def compute_technicals(df: pd.DataFrame) -> dict:
 # ════════════════════════════════════════════════════════════════════
 _PRE_SYS = ("You are a disciplined NSE equity trader. Protect capital first. "
             "R:R must be >= 1.5. Max risk 2% per trade. HOLD if setup unclear. "
-            "Output JSON: action|quantity|stop_loss|take_profit|risk_reward|reasoning|confidence|key_risk")
+            "Ground EVERY decision in the SPECIFIC features given (EMA stack, VWAP, "
+            "PDH/PDL state, zones, VIX regime, fundamentals) — never invent data. "
+            "Output JSON with keys: action|quantity|stop_loss|take_profit|risk_reward|"
+            "reasoning|confidence|key_risk|features_used. "
+            "'reasoning' = 2-3 short clauses each citing a named feature. "
+            "'features_used' = list of the exact feature names you relied on, e.g. "
+            "[\"ema_stack\",\"vwap\",\"pdh_state\",\"zone.1h.demand\",\"vix.regime\"].")
 _POST_SYS = ("Review the completed trade and extract one concrete lesson. "
              "Output JSON: outcome|exit_reason_analysis|what_went_right|what_went_wrong|"
              "lesson_learned|strategy_adjustment")
@@ -385,11 +653,13 @@ def pre_trade_decision(symbol, date, tech, fund, capital, history) -> dict:
         if rr >= 1.5:
             return {"action": "BUY", "quantity": qty, "stop_loss": sl, "take_profit": tp,
                     "risk_reward": rr, "confidence": 0.55,
-                    "reasoning": f"Rule: bullish EMA, above VWAP, support {ns['mid']:.1f}",
-                    "key_risk": "EMA reversal"}
+                    "reasoning": f"Rule: bullish EMA stack, above VWAP, support {ns['mid']:.1f}",
+                    "key_risk": "EMA reversal",
+                    "features_used": ["ema_stack", "above_vwap", "nearest_support"]}
     return {"action": "HOLD", "quantity": 0, "stop_loss": 0, "take_profit": 0,
             "risk_reward": 0, "confidence": 0.4,
-            "reasoning": "Rule: no clear setup.", "key_risk": "—"}
+            "reasoning": "Rule: no clear setup (EMA stack/VWAP not aligned).", "key_risk": "—",
+            "features_used": ["ema_stack", "above_vwap"]}
 
 
 def post_trade_analysis(trade, forward_df) -> dict:
@@ -474,6 +744,12 @@ class TradingAgent:
 
         candles = get_candles(self.symbol, date, LOOKBACK_DAYS)
         tech    = compute_technicals(candles)
+        vc = vix_context(date)
+        if vc:
+            tech["vix_ctx"] = vc
+        zc = compute_zones(self.symbol, date)
+        if zc:
+            tech["zones"] = zc
         fund    = get_fundamentals(self.symbol, date)
         entry_p = tech["close"]
 
