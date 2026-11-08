@@ -46,6 +46,16 @@ import pandas as pd
 import requests
 import yfinance as yf
 
+# ── Load .env BEFORE reading any config below ───────────────────────────────
+# flywheel.py imports this module before it calls load_env(), so we must apply
+# .env here or every setting below would silently fall back to its default
+# (DATA_SOURCE=yfinance, FUNDAMENTALS_SOURCE=yfinance, VIX off, ...).
+try:
+    from config import load_env
+    load_env()
+except Exception:
+    pass
+
 
 # ════════════════════════════════════════════════════════════════════
 #  CONFIG (overridable via environment variables)
@@ -381,9 +391,14 @@ def get_fundamentals(symbol: str, as_of_date: str) -> dict:
                 f.setdefault("net_income", f.get("pat"))
                 f.setdefault("quarter_key", _quarter_key(f.get("quarter_end", as_of_date)))
                 return f
-            print(f"  [xbrl] no filing <= {as_of_date} for {symbol}; falling back to yfinance")
+            # No XBRL filing on/before this date. Fundamentals are OPTIONAL
+            # (15-year training), so return empty → tagged 'none'. Do NOT fall
+            # back to yfinance here (it crashes on 'N/A' for old dates and would
+            # mix sources). Set FUNDAMENTALS_SOURCE=yfinance explicitly to use it.
+            return {}
         except Exception as e:
-            print(f"  [xbrl error: {e}] falling back to yfinance")
+            print(f"  [xbrl error: {e}] — continuing without fundamentals")
+            return {}
 
     qkey = _quarter_key(as_of_date)
     with sqlite3.connect(DB_PATH) as con:
