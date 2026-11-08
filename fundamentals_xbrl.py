@@ -161,8 +161,9 @@ def load_and_dedup(symbol: str, xbrl_dir: str, nature: str) -> list[dict]:
     """
     base = Path(xbrl_dir)
     sub = base / symbol
-    files = (list(sub.glob("*.xml")) + list(sub.glob("*.xbrl"))) if sub.is_dir() else \
-            [p for p in base.glob("*") if symbol.upper() in p.name.upper()
+    # rglob = recurse into subfolders, so data/fundamentals/CANBK/2014/*.xml works too.
+    files = (list(sub.rglob("*.xml")) + list(sub.rglob("*.xbrl"))) if sub.is_dir() else \
+            [p for p in base.rglob("*") if symbol.upper() in p.name.upper()
              and p.suffix.lower() in (".xml", ".xbrl")]
 
     by_quarter: dict[str, dict] = {}
