@@ -1,0 +1,248 @@
+{
+  "document_type": "reconstructed_html_table_extraction",
+  "is_official_xbrl": false,
+  "source_url": "https://nsearchives.nseindia.com/archives/financial_results/financial_res_CANBK_1005666.html",
+  "filing_metadata": {
+    "audited": "Un-Audited",
+    "bank": "B",
+    "broadCastDate": "13-Feb-2016 18:41:19",
+    "companyName": "Canara Bank",
+    "consolidated": "Non-Consolidated",
+    "cumulative": "Non-cumulative",
+    "difference": "00:02:48",
+    "exchdisstime": "13-Feb-2016 18:44:07",
+    "filingDate": "13-Feb-2016 18:41",
+    "financialYear": "01-Apr-2015 To 31-Mar-2016",
+    "format": "Old",
+    "fromDate": "01-Oct-2015",
+    "indAs": "Non-Ind-AS",
+    "industry": "-",
+    "isin": "INE476A01014",
+    "oldNewFlag": null,
+    "params": "01-Oct-201531-Dec-2015Q3UBNNAECANBK",
+    "period": "Quarterly",
+    "reInd": "-",
+    "relatingTo": "Third Quarter",
+    "resultDescription": null,
+    "resultDetailedDataLink": "https://nsearchives.nseindia.com/archives/financial_results/financial_res_CANBK_1005666.html",
+    "seqNumber": "1005666",
+    "symbol": "CANBK",
+    "toDate": "31-Dec-2015",
+    "xbrl": "https://nsearchives.nseindia.com/corporate/xbrl/-"
+  },
+  "tables": [
+    {
+      "table_number": 1,
+      "rows": [
+        [
+          "Symbol",
+          "CANBK",
+          "Company",
+          "Canara Bank"
+        ],
+        [
+          "Industry",
+          "-",
+          "Audited / Un-Audited",
+          "Unaudited"
+        ],
+        [
+          "Cumulative / Non-Cumulative",
+          "Non-Cumulative",
+          "Consolidated / Non-Consolidated",
+          "Non-Consolidated"
+        ],
+        [
+          "Period",
+          "Quarterly",
+          "Relating to",
+          "Third Quarter"
+        ],
+        [
+          "Financial Year",
+          "01-Apr-2015 To 31-Mar-2016",
+          "Period Ended",
+          "31-Dec-2015"
+        ]
+      ]
+    },
+    {
+      "table_number": 2,
+      "rows": [
+        [
+          "Description",
+          "Amount(Rs. in lakhs)"
+        ],
+        [
+          "Interest/Discount on Advances/Bills",
+          "762914.00"
+        ],
+        [
+          "Income on Investments",
+          "292403.00"
+        ],
+        [
+          "Interest on Balances With RBI & Other Inter bank Funds",
+          "32890.00"
+        ],
+        [
+          "Others",
+          "0.00"
+        ],
+        [
+          "Interest Earned",
+          "1088207.00"
+        ],
+        [
+          "Other Income",
+          "116856.00"
+        ],
+        [
+          "Total Income",
+          "1205063.00"
+        ],
+        [
+          "Interest Expended",
+          "865547.00"
+        ],
+        [
+          "Employees cost",
+          "103975.00"
+        ],
+        [
+          "Other Operating Expenses (Any item exceeding 10% of the total expenses relating to continuing operations to be shown separately)",
+          "80297.00"
+        ],
+        [
+          "Operating Expenses",
+          "184272.00"
+        ],
+        [
+          "Total Expenditure excluding provisions and contingencies",
+          "1049819.00"
+        ],
+        [
+          "Operating Profit before provisions and contingencies",
+          "155244.00"
+        ],
+        [
+          "Provisions (other than tax) and contingencies",
+          "142885.00"
+        ],
+        [
+          "Exceptional Items",
+          "0.00"
+        ],
+        [
+          "Profit(+) / Loss(-) from Ordinary Activities before tax",
+          "12359.00"
+        ],
+        [
+          "Tax Expense",
+          "3862.00"
+        ],
+        [
+          "Net Profit(+) / Loss(-) from Ordinary Activities after tax",
+          "8497.00"
+        ],
+        [
+          "Extraordinary Items (net of tax expense)",
+          "0.00"
+        ],
+        [
+          "Net Profit (+) / Loss (-) for the period",
+          "8497.00"
+        ],
+        [
+          "Face Value (in Rs.)",
+          "10"
+        ],
+        [
+          "Paid-up Equity Share Capital (in Rs.)",
+          "54299.00"
+        ],
+        [
+          "Reserves excluding Revaluation Reserves as per balance sheet of previous accounting year",
+          "-"
+        ],
+        [
+          "Percentage of shares Held by Government of India",
+          "66.30"
+        ],
+        [
+          "Capital Adequacy Ratio",
+          "11.54"
+        ],
+        [
+          "Basic EPS before Extraordinary items (in Rs.)",
+          "1.56"
+        ],
+        [
+          "Diluted EPS before Extraordinary items (in Rs.)",
+          "1.56"
+        ],
+        [
+          "Basic EPS after Extraordinary items (in Rs.)",
+          "1.56"
+        ],
+        [
+          "Diluted EPS after Extraordinary items (in Rs.)",
+          "1.56"
+        ],
+        [
+          "Gross/Net NPA",
+          "12940.10"
+        ],
+        [
+          "% of Gross/Net NPA",
+          "3.90"
+        ],
+        [
+          "Return on Assets",
+          "0.06"
+        ],
+        [
+          "Notes To Accounts",
+          "Click here"
+        ]
+      ]
+    },
+    {
+      "table_number": 3,
+      "rows": [
+        [
+          "Segment Reporting (Rs.lakhs)"
+        ],
+        [
+          "Segment Revenue"
+        ],
+        [
+          "Total",
+          "1205063.00"
+        ],
+        [
+          "Net sales/Income from Operations",
+          "1205063.00"
+        ],
+        [
+          "Segment Results"
+        ],
+        [
+          "Total",
+          "153191.00"
+        ],
+        [
+          "Total Profit Before Tax",
+          "155244.00"
+        ],
+        [
+          "CAPITAL EMPLOYED"
+        ],
+        [
+          "Total",
+          "3006734.00"
+        ]
+      ]
+    }
+  ]
+}

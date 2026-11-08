@@ -1,0 +1,284 @@
+{
+  "document_type": "reconstructed_html_table_extraction",
+  "is_official_xbrl": false,
+  "source_url": "https://nsearchives.nseindia.com/archives/financial_results/financial_res_CANBK_1002793.html",
+  "filing_metadata": {
+    "audited": "Un-Audited",
+    "bank": "B",
+    "broadCastDate": "05-Nov-2015 11:34:43",
+    "companyName": "Canara Bank",
+    "consolidated": "Non-Consolidated",
+    "cumulative": "Non-cumulative",
+    "difference": "00:03:19",
+    "exchdisstime": "05-Nov-2015 11:38:02",
+    "filingDate": "05-Nov-2015 11:34",
+    "financialYear": "01-Apr-2015 To 31-Mar-2016",
+    "format": "Old",
+    "fromDate": "01-Jul-2015",
+    "indAs": "Non-Ind-AS",
+    "industry": "-",
+    "isin": "INE476A01014",
+    "oldNewFlag": null,
+    "params": "01-Jul-201530-Sep-2015Q2UBNNAECANBK",
+    "period": "Quarterly",
+    "reInd": "-",
+    "relatingTo": "Second Quarter",
+    "resultDescription": null,
+    "resultDetailedDataLink": "https://nsearchives.nseindia.com/archives/financial_results/financial_res_CANBK_1002793.html",
+    "seqNumber": "1002793",
+    "symbol": "CANBK",
+    "toDate": "30-Sep-2015",
+    "xbrl": "https://nsearchives.nseindia.com/corporate/xbrl/-"
+  },
+  "tables": [
+    {
+      "table_number": 1,
+      "rows": [
+        [
+          "Symbol",
+          "CANBK",
+          "Company",
+          "Canara Bank"
+        ],
+        [
+          "Industry",
+          "-",
+          "Audited / Un-Audited",
+          "Unaudited"
+        ],
+        [
+          "Cumulative / Non-Cumulative",
+          "Non-Cumulative",
+          "Consolidated / Non-Consolidated",
+          "Non-Consolidated"
+        ],
+        [
+          "Period",
+          "Quarterly",
+          "Relating to",
+          "Second Quarter"
+        ],
+        [
+          "Financial Year",
+          "01-Apr-2015 To 31-Mar-2016",
+          "Period Ended",
+          "30-Sep-2015"
+        ]
+      ]
+    },
+    {
+      "table_number": 2,
+      "rows": [
+        [
+          "Description",
+          "Amount(Rs. in lakhs)"
+        ],
+        [
+          "Interest/Discount on Advances/Bills",
+          "812601.00"
+        ],
+        [
+          "Income on Investments",
+          "294292.00"
+        ],
+        [
+          "Interest on Balances With RBI & Other Inter bank Funds",
+          "19857.00"
+        ],
+        [
+          "Others",
+          "0.00"
+        ],
+        [
+          "Interest Earned",
+          "1126750.00"
+        ],
+        [
+          "Other Income",
+          "121045.00"
+        ],
+        [
+          "Total Income",
+          "1247795.00"
+        ],
+        [
+          "Interest Expended",
+          "862100.00"
+        ],
+        [
+          "Employees cost",
+          "110784.00"
+        ],
+        [
+          "Other Operating Expenses (Any item exceeding 10% of the total expenses relating to continuing operations to be shown separately)",
+          "80501.00"
+        ],
+        [
+          "Operating Expenses",
+          "191285.00"
+        ],
+        [
+          "Total Expenditure excluding provisions and contingencies",
+          "1053385.00"
+        ],
+        [
+          "Operating Profit before provisions and contingencies",
+          "194410.00"
+        ],
+        [
+          "Provisions (other than tax) and contingencies",
+          "121231.00"
+        ],
+        [
+          "Exceptional Items",
+          "0.00"
+        ],
+        [
+          "Profit(+) / Loss(-) from Ordinary Activities before tax",
+          "73179.00"
+        ],
+        [
+          "Tax Expense",
+          "20293.00"
+        ],
+        [
+          "Net Profit(+) / Loss(-) from Ordinary Activities after tax",
+          "52886.00"
+        ],
+        [
+          "Extraordinary Items (net of tax expense)",
+          "0.00"
+        ],
+        [
+          "Net Profit (+) / Loss (-) for the period",
+          "52886.00"
+        ],
+        [
+          "Dividend (%)",
+          "-"
+        ],
+        [
+          "Face Value (in Rs.)",
+          "10.00"
+        ],
+        [
+          "Paid-up Equity Share Capital (in Rs.)",
+          "54299.00"
+        ],
+        [
+          "Reserves excluding Revaluation Reserves as per balance sheet of previous accounting year",
+          "0.00"
+        ],
+        [
+          "Percentage of shares Held by Government of India",
+          "66.30"
+        ],
+        [
+          "Capital Adequacy Ratio",
+          "11.04"
+        ],
+        [
+          "Basic EPS before Extraordinary items (in Rs.)",
+          "10.26"
+        ],
+        [
+          "Diluted EPS before Extraordinary items (in Rs.)",
+          "10.26"
+        ],
+        [
+          "Basic EPS after Extraordinary items (in Rs.)",
+          "10.26"
+        ],
+        [
+          "Diluted EPS after Extraordinary items (in Rs.)",
+          "10.26"
+        ],
+        [
+          "Gross/Net NPA",
+          "938253.00"
+        ],
+        [
+          "% of Gross/Net NPA",
+          "2.90"
+        ],
+        [
+          "Return on Assets",
+          "0.39"
+        ],
+        [
+          "Public Shareholding (Number of Shares)",
+          "183000000.00"
+        ],
+        [
+          "Public Shareholding (%)",
+          "33.70"
+        ],
+        [
+          "Promoter & Promoter group Number of Shares Pledged / Encumbered",
+          "-"
+        ],
+        [
+          "Promoter & Promoter group Shares Pledged / Encumbered (as a % of total shareholding of Promoter and Promoter Group)",
+          "0.00"
+        ],
+        [
+          "Promoter & Promoter group Shares Pledged / Encumbered (as a % total share capital of the company)",
+          "0.00"
+        ],
+        [
+          "Promoter & Promoter group Number of Shares Non-encumbered",
+          "359991054.00"
+        ],
+        [
+          "Promoter & Promoter group Shares Non-encumbered (as a % of total shareholding of Promoter and Promoter Group)",
+          "100.00"
+        ],
+        [
+          "Promoter & Promoter group Shares Non-encumbered (as a % total share capital of the company)",
+          "66.30"
+        ],
+        [
+          "Notes To Accounts",
+          "Click here"
+        ]
+      ]
+    },
+    {
+      "table_number": 3,
+      "rows": [
+        [
+          "Segment Reporting (Rs.lakhs)"
+        ],
+        [
+          "Segment Revenue"
+        ],
+        [
+          "Total",
+          "1247795.00"
+        ],
+        [
+          "Net sales/Income from Operations",
+          "1247795.00"
+        ],
+        [
+          "Segment Results"
+        ],
+        [
+          "Total",
+          "191748.00"
+        ],
+        [
+          "Total Profit Before Tax",
+          "194410.00"
+        ],
+        [
+          "CAPITAL EMPLOYED"
+        ],
+        [
+          "Total",
+          "2999706.00"
+        ]
+      ]
+    }
+  ]
+}
