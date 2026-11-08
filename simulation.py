@@ -351,6 +351,25 @@ def _quarter_key(date_str: str) -> str:
     return f"{t.year}-Q{(t.month - 1)//3 + 1}"
 
 
+def _fund_completeness(fund: dict, as_of: str) -> str:
+    """
+    Context-completeness tag for a trade's fundamentals:
+      none  = no fundamentals available at all
+      fresh = most-recent filing reported within ~140 days (normal quarterly cadence)
+      stale = carried forward > ~140 days (a quarter is missing from our data)
+    """
+    if not fund:
+        return "none"
+    ref = fund.get("result_date") or fund.get("quarter_end")
+    if not ref:
+        return "stale"
+    try:
+        days = (pd.Timestamp(as_of) - pd.Timestamp(ref)).days
+    except Exception:
+        return "stale"
+    return "fresh" if 0 <= days <= 140 else "stale"
+
+
 def get_fundamentals(symbol: str, as_of_date: str) -> dict:
     # ── XBRL source (official SEBI filings) — preferred when configured ──────
     if FUNDAMENTALS_SOURCE == "xbrl":
@@ -751,6 +770,7 @@ class TradingAgent:
         if zc:
             tech["zones"] = zc
         fund    = get_fundamentals(self.symbol, date)
+        tech["fund_completeness"] = _fund_completeness(fund, date)
         entry_p = tech["close"]
 
         dec = pre_trade_decision(self.symbol, date, tech, fund, self.capital, self.history)
