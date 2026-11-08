@@ -53,6 +53,7 @@ def _record_from_example(ex: dict, split: str) -> dict:
         "conf": o.get("confidence", ""),
         "rr": o.get("risk_reward", ""),
         "pnl": meta.get("pnl", ""),
+        "fund": meta.get("fund_completeness", ""),
         "exit_reason": meta.get("exit_reason", ""),
         "input": usr,
         "output": json.dumps(o, indent=2) if o else asst,
@@ -108,7 +109,7 @@ def demo_records() -> list[dict]:
             "split": random.choice(["train", "val", "test"]),
             "type": "pre_trade", "symbol": "CANBK", "date": f"2024-01-{i+1:02d}",
             "action": act, "conf": out["confidence"], "rr": out["risk_reward"],
-            "pnl": pnl, "exit_reason": random.choice(["take_profit", "stop_loss", "time_exit", ""]),
+            "pnl": pnl, "fund": __import__("random").choice(["fresh","stale","none"]), "exit_reason": random.choice(["take_profit", "stop_loss", "time_exit", ""]),
             "input": inp, "output": json.dumps(out, indent=2),
         })
     return recs
@@ -162,7 +163,7 @@ const DATA = __DATA__;
 const COLS = [
   {k:"split",t:"split"},{k:"type",t:"type"},{k:"symbol",t:"symbol"},{k:"date",t:"date"},
   {k:"action",t:"action"},{k:"conf",t:"conf",n:1},{k:"rr",t:"R:R",n:1},
-  {k:"pnl",t:"P&L",n:1},{k:"exit_reason",t:"exit"}
+  {k:"pnl",t:"P&L",n:1},{k:"fund",t:"fund"},{k:"exit_reason",t:"exit"}
 ];
 let sortK=null, sortDir=1, rows=DATA.map((d,i)=>({...d,_i:i}));
 const hr=document.getElementById("hr"), tb=document.getElementById("tb"), q=document.getElementById("q");

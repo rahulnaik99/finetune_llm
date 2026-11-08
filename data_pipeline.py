@@ -86,6 +86,14 @@ def _parse_technicals(tech_json: str) -> str:
     return "\n".join(lines)
 
 
+
+def _tech_field(trade: dict, key: str, default=None):
+    """Pull a field out of the stored technicals_json snapshot."""
+    try:
+        return json.loads(trade.get("technicals_json", "{}")).get(key, default)
+    except Exception:
+        return default
+
 def build_pre_trade_example(trade: dict, prev_trades: list[dict]) -> dict | None:
     """Build a (user_prompt → assistant_json) pair for the pre-trade decision."""
     tech_block = _parse_technicals(trade.get("technicals_json", "{}"))
@@ -136,6 +144,7 @@ def build_pre_trade_example(trade: dict, prev_trades: list[dict]) -> dict | None
             "date": trade["decision_date"],
             "pnl": trade["pnl"],
             "exit_reason": trade["exit_reason"],
+            "fund_completeness": _tech_field(trade, "fund_completeness", "none"),
         },
     }
 
@@ -176,18 +185,25 @@ def build_post_trade_example(trade: dict) -> dict | None:
             "symbol": trade["symbol"],
             "date": trade["decision_date"],
             "pnl": trade["pnl"],
+            "fund_completeness": _tech_field(trade, "fund_completeness", "none"),
         },
     }
 
 
 def quality_filter(example: dict, min_confidence: float, min_rr: float) -> bool:
     """Drop low-quality examples before training."""
+    import os
     meta = example.get("_meta", {})
     try:
         assistant_text = example["messages"][-1]["content"]
         parsed = json.loads(assistant_text)
     except Exception:
         return False   # malformed JSON → drop
+
+    # Optional: require FRESH fundamentals (default off → keep all, just tagged).
+    if os.environ.get("REQUIRE_FUNDAMENTALS", "0").strip().lower() in ("1", "true", "yes", "on"):
+        if meta.get("fund_completeness", "none") != "fresh":
+            return False
 
     if meta.get("type") == "pre_trade":
         # Drop HOLDs (no learning signal for entry strategy)
