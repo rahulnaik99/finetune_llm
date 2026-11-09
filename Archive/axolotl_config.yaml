@@ -1,0 +1,95 @@
+# axolotl_config.yaml
+# ────────────────────
+# Production fine-tuning with Axolotl (replaces train_qlora.py).
+# Axolotl is the industry-standard fine-tuning framework — used at
+# Mistral, Together.ai, and most LLM fine-tuning teams.
+#
+# Install:  pip install axolotl[flash-attn]
+# Run:      axolotl train axolotl_config.yaml
+# Resume:   axolotl train axolotl_config.yaml --resume-from-checkpoint output/nemotron-trading/checkpoint-300
+
+# ── Base model ────────────────────────────────────────────────────────────────
+base_model: nvidia/Nemotron-Nano-4B-Instruct
+model_type: MistralForCausalLM
+tokenizer_type: AutoTokenizer
+trust_remote_code: true
+
+# ── QLoRA (4-bit NF4) ─────────────────────────────────────────────────────────
+adapter: qlora
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target_linear: true          # targets all linear layers automatically
+lora_target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+load_in_4bit: true
+bnb_4bit_compute_dtype: bfloat16
+bnb_4bit_quant_type: nf4
+bnb_4bit_use_double_quant: true
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+datasets:
+  - path: data/trading_train.jsonl
+    type: chat_template          # applies model's native chat template automatically
+    chat_template: chatml        # Nemotron uses ChatML: <|im_start|>role\ncontent<|im_end|>
+    field_messages: messages     # the key in each JSONL line
+
+val_set_size: 0.0                # we have a separate val file
+test_datasets:
+  - path: data/trading_val.jsonl
+    type: chat_template
+    chat_template: chatml
+    field_messages: messages
+
+# ── Training ──────────────────────────────────────────────────────────────────
+sequence_len: 1024               # compact prompts are ~188 tokens; 1024 is safe
+micro_batch_size: 2
+gradient_accumulation_steps: 8   # effective batch = 2 × 8 = 16
+num_epochs: 3
+learning_rate: 2e-4
+lr_scheduler: cosine
+warmup_ratio: 0.05
+weight_decay: 0.01
+optimizer: adamw_bnb_8bit        # 8-bit Adam — saves memory, widely used in production
+
+# ── Memory efficiency ─────────────────────────────────────────────────────────
+gradient_checkpointing: true
+flash_attention: true            # requires: pip install flash-attn
+bf16: true                       # bfloat16 on A100; set fp16: true for older GPUs
+tf32: false
+
+# ── Only train on assistant turns (not system/user) ───────────────────────────
+train_on_inputs: false           # this is the key: loss only on <|assistant|> tokens
+
+# ── Checkpointing ─────────────────────────────────────────────────────────────
+output_dir: output/nemotron-trading
+save_strategy: steps
+save_steps: 100
+save_total_limit: 3              # keep only last 3 checkpoints (saves disk)
+load_best_model_at_end: true
+metric_for_best_model: eval_loss
+
+# ── Evaluation ───────────────────────────────────────────────────────────────
+eval_strategy: steps
+eval_steps: 50
+eval_batch_size: 2
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+logging_steps: 10
+report_to:
+  - mlflow                       # MLflow experiment tracking (mlflow ui to view)
+  - tensorboard                  # fallback visualization
+
+# ── MLflow config (set MLFLOW_TRACKING_URI env var for remote) ───────────────
+# export MLFLOW_TRACKING_URI=http://localhost:5000
+# mlflow ui  (run this in a separate terminal)
+
+# ── Hub push (optional — push adapter to HuggingFace after training) ─────────
+# hub_model_id: your-hf-username/nemotron-trading-canbk
+# hub_strategy: every_save

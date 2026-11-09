@@ -1,0 +1,75 @@
+# params.yaml
+# ─────────────
+# Single source of truth for all hyperparameters.
+# DVC tracks changes here — if you change lora_r, `dvc repro` only re-runs
+# the fine-tune stage (not data collection), saving time.
+#
+# Reference in code:  from pathlib import Path; import yaml
+#                     p = yaml.safe_load(Path("params.yaml").read_text())
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+symbols:
+  - CANBK
+  - SBIN
+  - HDFCBANK
+  - ICICIBANK
+  - AXISBANK
+  - KOTAKBANK
+  - PNB
+  - BANKBARODA
+  - INDUSINDBK
+  - FEDERALBNK
+
+start_date: "2023-01-10"    # start of simulation history
+end_date:   "2024-10-10"    # strict cutoff (no data beyond this)
+rounds: 5                    # flywheel rounds
+episodes_per_round: 50       # episodes per round per symbol
+
+# ── Data quality ──────────────────────────────────────────────────────────────
+min_confidence: 0.5          # drop decisions below this confidence
+min_rr:         1.3          # drop trades with R:R below this
+val_ratio:      0.1
+test_ratio:     0.1
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+base_model: "nvidia/Nemotron-Nano-4B-Instruct"
+# MLX community provides pre-quantised versions for Apple Silicon:
+mlx_model:  "mlx-community/Nemotron-Nano-4B-Instruct-4bit"
+
+# ── LoRA hyperparameters ──────────────────────────────────────────────────────
+# r (rank): higher = more capacity but more VRAM and slower
+# Rule of thumb: r=8 for <200 examples, r=16 for 200-2000, r=32 for >2000
+lora_r:     16
+lora_alpha: 32               # always 2× lora_r
+
+# Which attention layers to add adapters to
+# All 7 = full capacity; use fewer if VRAM is tight
+lora_target_modules:
+  - q_proj
+  - k_proj
+  - v_proj
+  - o_proj
+  - gate_proj
+  - up_proj
+  - down_proj
+
+lora_dropout: 0.05
+
+# ── Training ──────────────────────────────────────────────────────────────────
+max_seq_length:  1024        # compact prompts are ~188 tokens; 1024 is safe
+batch_size:      2
+grad_accum:      8           # effective batch = 2 × 8 = 16
+learning_rate:   0.0002
+num_epochs:      3
+warmup_ratio:    0.05
+weight_decay:    0.01
+save_every:      100         # checkpoint every N steps (enables session resumption)
+
+# MLX-specific (Apple Silicon)
+mlx_iters:       600         # ~3 epochs for 500 examples, batch=4
+mlx_lora_layers: 8           # number of transformer layers to add adapters to
+
+# ── Serving (vLLM) ────────────────────────────────────────────────────────────
+vllm_port:  8001
+vllm_model: "nemotron-trading"
+vllm_max_model_len: 2048
