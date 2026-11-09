@@ -1,0 +1,238 @@
+<?xml version='1.0' encoding='utf-8'?>
+<ReconstructedFinancialTables documentType="HTML_TABLE_EXTRACTION" isOfficialXBRL="false" symbol="CANBK">
+  <SourceURL>https://nsearchives.nseindia.com/archives/financial_results/financial_res_CANBK_1031920.html</SourceURL>
+  <FilingMetadata>
+    <audited>Un-Audited</audited>
+    <bank>B</bank>
+    <broadCastDate>22-Nov-2017 20:59:25</broadCastDate>
+    <companyName>Canara Bank</companyName>
+    <consolidated>Non-Consolidated</consolidated>
+    <cumulative>Non-cumulative</cumulative>
+    <difference>00:03:02</difference>
+    <exchdisstime>22-Nov-2017 21:02:27</exchdisstime>
+    <filingDate>22-Nov-2017 20:59</filingDate>
+    <financialYear>01-Apr-2017 To 31-Mar-2018</financialYear>
+    <format>Old</format>
+    <fromDate>01-Jul-2017</fromDate>
+    <indAs>Non-Ind-AS</indAs>
+    <industry>-</industry>
+    <isin>INE476A01014</isin>
+    <oldNewFlag />
+    <params>01-Jul-201730-Sep-2017Q2UBNNAECANBK</params>
+    <period>Quarterly</period>
+    <reInd>A</reInd>
+    <relatingTo>Second Quarter</relatingTo>
+    <resultDescription />
+    <resultDetailedDataLink>https://nsearchives.nseindia.com/archives/financial_results/financial_res_CANBK_1031920.html</resultDetailedDataLink>
+    <seqNumber>1031920</seqNumber>
+    <symbol>CANBK</symbol>
+    <toDate>30-Sep-2017</toDate>
+    <xbrl>https://nsearchives.nseindia.com/corporate/xbrl/-</xbrl>
+  </FilingMetadata>
+  <Tables>
+    <Table number="1">
+      <Row number="1">
+        <Cell number="1">Symbol</Cell>
+        <Cell number="2">CANBK</Cell>
+        <Cell number="3">Company</Cell>
+        <Cell number="4">Canara Bank</Cell>
+      </Row>
+      <Row number="2">
+        <Cell number="1">Industry</Cell>
+        <Cell number="2">-</Cell>
+        <Cell number="3">Audited / Un-Audited</Cell>
+        <Cell number="4">Unaudited</Cell>
+      </Row>
+      <Row number="3">
+        <Cell number="1">Cumulative / Non-Cumulative</Cell>
+        <Cell number="2">Non-Cumulative</Cell>
+        <Cell number="3">Consolidated / Non-Consolidated</Cell>
+        <Cell number="4">Non-Consolidated</Cell>
+      </Row>
+      <Row number="4">
+        <Cell number="1">Period</Cell>
+        <Cell number="2">Quarterly</Cell>
+        <Cell number="3">Relating to</Cell>
+        <Cell number="4">Second Quarter</Cell>
+      </Row>
+      <Row number="5">
+        <Cell number="1">Financial Year</Cell>
+        <Cell number="2">01-Apr-2017 To 31-Mar-2018</Cell>
+        <Cell number="3">Period Ended</Cell>
+        <Cell number="4">30-Sep-2017</Cell>
+      </Row>
+    </Table>
+    <Table number="2">
+      <Row number="1">
+        <Cell number="1">Description</Cell>
+        <Cell number="2">Amount(Rs. in lakhs)</Cell>
+      </Row>
+      <Row number="2">
+        <Cell number="1">Interest/Discount on Advances/Bills</Cell>
+        <Cell number="2">727626.00</Cell>
+      </Row>
+      <Row number="3">
+        <Cell number="1">Income on Investments</Cell>
+        <Cell number="2">259503.00</Cell>
+      </Row>
+      <Row number="4">
+        <Cell number="1">Interest on Balances With RBI &amp; Other Inter bank Funds</Cell>
+        <Cell number="2">15110.00</Cell>
+      </Row>
+      <Row number="5">
+        <Cell number="1">Others</Cell>
+        <Cell number="2">3606.00</Cell>
+      </Row>
+      <Row number="6">
+        <Cell number="1">Interest Earned</Cell>
+        <Cell number="2">1005845.00</Cell>
+      </Row>
+      <Row number="7">
+        <Cell number="1">Other Income</Cell>
+        <Cell number="2">193619.00</Cell>
+      </Row>
+      <Row number="8">
+        <Cell number="1">Total Income</Cell>
+        <Cell number="2">1199464.00</Cell>
+      </Row>
+      <Row number="9">
+        <Cell number="1">Interest Expended</Cell>
+        <Cell number="2">727508.00</Cell>
+      </Row>
+      <Row number="10">
+        <Cell number="1">Employees cost</Cell>
+        <Cell number="2">137728.00</Cell>
+      </Row>
+      <Row number="11">
+        <Cell number="1">Other Operating Expenses (Any item exceeding 10% of the total expenses relating to continuing operations to be shown separately)</Cell>
+        <Cell number="2">86246.00</Cell>
+      </Row>
+      <Row number="12">
+        <Cell number="1">Operating Expenses</Cell>
+        <Cell number="2">223974.00</Cell>
+      </Row>
+      <Row number="13">
+        <Cell number="1">Total Expenditure excluding provisions and contingencies</Cell>
+        <Cell number="2">951482.00</Cell>
+      </Row>
+      <Row number="14">
+        <Cell number="1">Operating Profit before provisions and contingencies</Cell>
+        <Cell number="2">247982.00</Cell>
+      </Row>
+      <Row number="15">
+        <Cell number="1">Provisions (other than tax) and contingencies</Cell>
+        <Cell number="2">215664.00</Cell>
+      </Row>
+      <Row number="16">
+        <Cell number="1">Exceptional Items</Cell>
+        <Cell number="2">0.00</Cell>
+      </Row>
+      <Row number="17">
+        <Cell number="1">Profit(+) / Loss(-) from Ordinary Activities before tax</Cell>
+        <Cell number="2">32318.00</Cell>
+      </Row>
+      <Row number="18">
+        <Cell number="1">Tax Expense</Cell>
+        <Cell number="2">6300.00</Cell>
+      </Row>
+      <Row number="19">
+        <Cell number="1">Net Profit(+) / Loss(-) from Ordinary Activities after tax</Cell>
+        <Cell number="2">26018.00</Cell>
+      </Row>
+      <Row number="20">
+        <Cell number="1">Extraordinary Items (net of tax expense)</Cell>
+        <Cell number="2">0.00</Cell>
+      </Row>
+      <Row number="21">
+        <Cell number="1">Net Profit (+) / Loss (-) for the period</Cell>
+        <Cell number="2">26018.00</Cell>
+      </Row>
+      <Row number="22">
+        <Cell number="1">Face Value (in Rs.)</Cell>
+        <Cell number="2">10</Cell>
+      </Row>
+      <Row number="23">
+        <Cell number="1">Paid-up Equity Share Capital (in Rs.)</Cell>
+        <Cell number="2">59729.00</Cell>
+      </Row>
+      <Row number="24">
+        <Cell number="1">Reserves excluding Revaluation Reserves as per balance sheet of previous accounting year</Cell>
+        <Cell number="2">-</Cell>
+      </Row>
+      <Row number="25">
+        <Cell number="1">Percentage of shares Held by Government of India</Cell>
+        <Cell number="2">66.30</Cell>
+      </Row>
+      <Row number="26">
+        <Cell number="1">Capital Adequacy Ratio</Cell>
+        <Cell number="2">12.45</Cell>
+      </Row>
+      <Row number="27">
+        <Cell number="1">Basic EPS before Extraordinary items (in Rs.)</Cell>
+        <Cell number="2">4.36</Cell>
+      </Row>
+      <Row number="28">
+        <Cell number="1">Diluted EPS before Extraordinary items (in Rs.)</Cell>
+        <Cell number="2">4.36</Cell>
+      </Row>
+      <Row number="29">
+        <Cell number="1">Basic EPS after Extraordinary items (in Rs.)</Cell>
+        <Cell number="2">4.36</Cell>
+      </Row>
+      <Row number="30">
+        <Cell number="1">Diluted EPS after Extraordinary items (in Rs.)</Cell>
+        <Cell number="2">4.36</Cell>
+      </Row>
+      <Row number="31">
+        <Cell number="1">Gross/Net NPA</Cell>
+        <Cell number="2">25165.57</Cell>
+      </Row>
+      <Row number="32">
+        <Cell number="1">% of Gross/Net NPA</Cell>
+        <Cell number="2">7.02</Cell>
+      </Row>
+      <Row number="33">
+        <Cell number="1">Return on Assets</Cell>
+        <Cell number="2">0.19</Cell>
+      </Row>
+      <Row number="34">
+        <Cell number="1">Notes To Accounts</Cell>
+        <Cell number="2">Click here</Cell>
+      </Row>
+    </Table>
+    <Table number="3">
+      <Row number="1">
+        <Cell number="1">Segment Reporting (Rs.lakhs)</Cell>
+      </Row>
+      <Row number="2">
+        <Cell number="1">Segment Revenue</Cell>
+      </Row>
+      <Row number="3">
+        <Cell number="1">Total</Cell>
+        <Cell number="2">1199464.00</Cell>
+      </Row>
+      <Row number="4">
+        <Cell number="1">Net sales/Income from Operations</Cell>
+        <Cell number="2">1199464.00</Cell>
+      </Row>
+      <Row number="5">
+        <Cell number="1">Segment Results</Cell>
+      </Row>
+      <Row number="6">
+        <Cell number="1">Total</Cell>
+        <Cell number="2">245121.00</Cell>
+      </Row>
+      <Row number="7">
+        <Cell number="1">Total Profit Before Tax</Cell>
+        <Cell number="2">32318.00</Cell>
+      </Row>
+      <Row number="8">
+        <Cell number="1">CAPITAL EMPLOYED</Cell>
+      </Row>
+      <Row number="9">
+        <Cell number="1">Total</Cell>
+        <Cell number="2">3412834.00</Cell>
+      </Row>
+    </Table>
+  </Tables>
+</ReconstructedFinancialTables>

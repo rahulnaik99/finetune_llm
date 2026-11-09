@@ -1,0 +1,12 @@
+# Lightweight dependencies needed to BUILD + TEST the pipeline in CI.
+# Heavy / platform-specific training deps (mlx-lm, torch, peft, trl,
+# bitsandbytes, yfinance, evidently) are NOT required for the test suite —
+# they are stubbed or lazily imported, so CI stays fast and host-agnostic.
+pytest>=8.0
+fastapi>=0.110
+uvicorn>=0.27
+httpx>=0.27
+pydantic>=2.6
+numpy>=1.26
+pandas>=2.0
+PyYAML>=6.0

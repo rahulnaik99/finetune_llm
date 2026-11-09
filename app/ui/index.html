@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trading-Agent Fine-tuning · Control Center</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="sap-logo.svg" alt="SAP" class="logo" />
+      <div class="titles">
+        <h1>Trading-Agent LLM Fine-tuning</h1>
+        <span class="subtitle">Pipeline Control Center</span>
+      </div>
+    </div>
+    <div class="conn" id="conn"><span class="dot" id="connDot"></span><span id="connText">connecting…</span></div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="datagen">Data Generation</button>
+    <button class="tab" data-tab="dataset">Dataset Viewer</button>
+    <button class="tab" data-tab="training">Training</button>
+    <button class="tab" data-tab="evaluation">Evaluation</button>
+  </nav>
+
+  <main>
+    <!-- OVERVIEW -->
+    <section class="panel active" id="panel-overview">
+      <h2>Pipeline status</h2>
+      <div class="stage-grid" id="stageGrid"></div>
+      <div class="card">
+        <h3>Run the full flywheel</h3>
+        <div class="form-row">
+          <label>Symbol <input id="fw-symbol" value="CANBK" /></label>
+          <label>Start date <input id="fw-start" value="2024-01-10" /></label>
+          <label>Rounds <input id="fw-rounds" type="number" value="5" min="1" /></label>
+          <label>Episodes/round <input id="fw-eps" type="number" value="50" min="1" /></label>
+          <label class="chk"><input id="fw-resume" type="checkbox" checked /> Resume</label>
+          <button class="primary" id="fw-run">Start flywheel</button>
+        </div>
+        <p class="hint">Resume continues from the last completed round — no data is regenerated.</p>
+      </div>
+    </section>
+
+    <!-- DATA GENERATION -->
+    <section class="panel" id="panel-datagen">
+      <h2>Data generation</h2>
+      <div class="card">
+        <div class="form-row">
+          <label>Symbol <input id="dg-symbol" value="CANBK" /></label>
+          <label>Start date <input id="dg-start" value="2024-01-10" /></label>
+          <label>Episodes <input id="dg-eps" type="number" value="50" min="1" /></label>
+          <label>Backend
+            <select id="dg-backend">
+              <option value="fallback">fallback (rules)</option>
+              <option value="ollama">ollama (teacher)</option>
+              <option value="adapter">adapter (student)</option>
+            </select>
+          </label>
+          <label class="chk"><input id="dg-resume" type="checkbox" checked /> Resume</label>
+          <button class="primary" id="dg-run">Generate</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="progress"><div class="bar" id="dg-bar"></div></div>
+        <div class="kv" id="dg-status"></div>
+      </div>
+      <div class="card">
+        <h3>Recently generated trades</h3>
+        <div class="table-wrap"><table id="dg-table"><thead><tr>
+          <th>Ep</th><th>Symbol</th><th>Date</th><th>Action</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>Exit reason</th>
+        </tr></thead><tbody></tbody></table></div>
+      </div>
+    </section>
+
+    <!-- DATASET VIEWER -->
+    <section class="panel" id="panel-dataset">
+      <h2>Generated datasets</h2>
+      <div class="card">
+        <div class="form-row">
+          <label>Round <select id="ds-round"></select></label>
+          <label>Split
+            <select id="ds-split"><option>train</option><option>val</option><option>test</option></select>
+          </label>
+          <button id="ds-load">Load</button>
+        </div>
+        <div class="stage-grid" id="ds-counts"></div>
+      </div>
+      <div class="card">
+        <div class="kv" id="ds-meta"></div>
+        <div id="ds-rows" class="jsonl"></div>
+      </div>
+    </section>
+
+    <!-- TRAINING -->
+    <section class="panel" id="panel-training">
+      <h2>Training dashboard</h2>
+      <div class="card">
+        <div class="form-row">
+          <label>Round <input id="tr-round" type="number" value="1" min="1" /></label>
+          <label>Iters <input id="tr-iters" type="number" value="600" min="1" /></label>
+          <label>LoRA r <input id="tr-r" type="number" value="16" min="1" /></label>
+          <label class="chk"><input id="tr-resume" type="checkbox" checked /> Resume</label>
+          <button class="primary" id="tr-run">Fine-tune</button>
+        </div>
+        <div class="progress"><div class="bar" id="tr-bar"></div></div>
+        <div class="kv" id="tr-status"></div>
+      </div>
+      <div class="card">
+        <h3>Loss curve (train vs val)</h3>
+        <canvas id="tr-chart" width="760" height="280"></canvas>
+      </div>
+    </section>
+
+    <!-- EVALUATION -->
+    <section class="panel" id="panel-evaluation">
+      <h2>Evaluation dashboard</h2>
+      <div class="card">
+        <div class="form-row">
+          <label>Round <input id="ev-round" type="number" value="1" min="1" /></label>
+          <label class="chk"><input id="ev-quality" type="checkbox" /> Model-quality</label>
+          <button class="primary" id="ev-run">Evaluate</button>
+        </div>
+        <div class="kv" id="ev-status"></div>
+      </div>
+      <div class="card">
+        <h3>Trading metrics by round</h3>
+        <canvas id="ev-chart" width="760" height="280"></canvas>
+      </div>
+      <div class="card">
+        <div class="metrics-grid" id="ev-metrics"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
