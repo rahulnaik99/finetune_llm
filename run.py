@@ -39,6 +39,11 @@ def main() -> None:
     d.add_argument("--symbol", default="CANBK"); d.add_argument("--start_date", default="2024-01-10")
     d.add_argument("--episodes", type=int, default=50); d.add_argument("--backend", default="fallback")
     d.add_argument("--no-resume", action="store_true")
+    d.add_argument("--symbols", default=None,
+                   help="Comma-separated symbols → run them in PARALLEL (e.g. CANBK,SBIN,HDFCBANK)")
+    d.add_argument("--workers", type=int, default=None, help="Parallel worker processes")
+    d.add_argument("--windows", type=int, default=1,
+                   help="Split ONE symbol into N parallel date-windows (parallel episodes)")
 
     sp = sub.add_parser("split"); sp.add_argument("--round", type=int, default=1)
     sp.add_argument("--force", action="store_true")
@@ -61,10 +66,23 @@ def main() -> None:
         import uvicorn
         uvicorn.run("app.main:app", host=args.host, port=args.port, reload=False)
     elif args.cmd == "datagen":
-        from modules.datagen.service import run_datagen
-        _print(run_datagen(symbol=args.symbol, start_date=args.start_date,
-                           episodes=args.episodes, backend=args.backend,
-                           resume=not args.no_resume))
+        if args.windows and args.windows > 1 and not args.symbols:
+            from modules.datagen.service import run_datagen_windows
+            _print(run_datagen_windows(
+                symbol=args.symbol, start_date=args.start_date, episodes=args.episodes,
+                workers=args.windows, backend=args.backend, resume=not args.no_resume))
+        elif args.symbols:
+            from modules.datagen.service import run_datagen_parallel
+            _print(run_datagen_parallel(
+                symbols=[s for s in args.symbols.split(",") if s.strip()],
+                start_date=args.start_date, episodes=args.episodes,
+                backend=args.backend, resume=not args.no_resume,
+                max_workers=args.workers))
+        else:
+            from modules.datagen.service import run_datagen
+            _print(run_datagen(symbol=args.symbol, start_date=args.start_date,
+                               episodes=args.episodes, backend=args.backend,
+                               resume=not args.no_resume))
     elif args.cmd == "split":
         from modules.splitter.service import run_split
         _print(run_split(round_num=args.round, force=args.force))

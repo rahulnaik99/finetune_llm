@@ -13,7 +13,7 @@ from common import jobs
 from common.schemas import JobAccepted, StateResponse, TrainRequest
 from common.state import StateStore
 
-from .service import STAGE, find_adapter, run_training
+from .service import STAGE, find_adapter, run_training, training_coverage
 
 router = APIRouter(prefix="/training", tags=["training"])
 
@@ -46,3 +46,9 @@ def state() -> StateResponse:
 @router.get("/adapter")
 def adapter(round_num: int = Query(1, ge=1)) -> dict:
     return {"round": round_num, "adapter": find_adapter(round_num)}
+
+
+@router.get("/coverage")
+def coverage(round_num: int = Query(1, ge=1)) -> dict:
+    """How many of the round's train rows are new vs already used to train."""
+    return training_coverage(round_num)

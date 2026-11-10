@@ -12,6 +12,7 @@ output/logs/
 mlruns/
 mlflow.db
 data/rounds/merged_train.jsonl
+data/shards/
 
 # OS / editor
 .DS_Store

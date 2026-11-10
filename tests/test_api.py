@@ -86,3 +86,18 @@ def test_openapi_lists_all_stage_routes():
     for p in ("/api/datagen/run", "/api/splitter/run", "/api/training/run",
               "/api/evaluation/run", "/api/orchestrator/run"):
         assert p in paths
+
+
+def test_new_endpoints_in_openapi():
+    spec = client.get("/openapi.json").json()["paths"]
+    for p in ("/api/datagen/run_parallel", "/api/datagen/run_windows",
+              "/api/training/coverage"):
+        assert p in spec
+
+
+def test_training_coverage_endpoint():
+    r = client.get("/api/training/coverage?round_num=1")
+    assert r.status_code == 200
+    body = r.json()
+    for k in ("total", "new", "already_trained", "registry_size"):
+        assert k in body

@@ -48,6 +48,8 @@ data/, output/         # datasets, adapters, state/, metrics/
 trading_agent.db       # raw generated data (SQLite)
 ```
 
+Narrative overview: [STORY.md](STORY.md) · change log: [TIMELINE.md](TIMELINE.md)
+
 Full module docs: [datagen](docs/trainingdata.md) ·
 [splitter](docs/splitter.md) · [training](docs/training.md) ·
 [evaluation](docs/evaluation.md) · [orchestrator](docs/orchestrator.md) ·
@@ -77,6 +79,7 @@ python run.py serve                        # → http://127.0.0.1:8000/ui
 
 ```bash
 python run.py datagen  --symbol CANBK --episodes 50     # resumable
+python run.py datagen  --symbols CANBK,SBIN,HDFCBANK --episodes 80 --workers 3  # parallel (one process/symbol)
 python run.py split    --round 1
 python run.py train    --round 1 --iters 600            # skips if adapter exists
 python run.py eval     --round 1

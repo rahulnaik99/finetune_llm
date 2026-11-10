@@ -111,3 +111,9 @@ td.pos { color: var(--sap-link); } td.neg { color: #8a1f1f; }
 .metric .value { font-size: 22px; font-weight: 700; color: var(--sap-blue); }
 
 canvas { max-width: 100%; }
+
+td.reason { max-width: 320px; color: var(--dark-gray); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.jrow { margin-bottom: 10px; }
+.jhead { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.jhead code { font-size: 11px; color: var(--med-gray); }

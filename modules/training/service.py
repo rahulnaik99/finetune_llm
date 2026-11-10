@@ -130,7 +130,54 @@ def run_training(
         store.fail(msg)
         raise RuntimeError(msg)
 
+    # Register which rows fed this adapter so we can tell "already trained" later.
+    trained_added = 0
+    try:
+        import json
+        from common.hashing import example_hash, add_trained
+        hashes = []
+        for line in merged.read_text().splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    hashes.append(example_hash(json.loads(line)))
+                except Exception:
+                    continue
+        trained_added = add_trained(hashes)
+    except Exception:
+        pass
+
     store.finish(message=f"round_{round_num:02d} trained → {adapter}",
-                 adapter=adapter, round=round_num, skipped=False)
+                 adapter=adapter, round=round_num, skipped=False,
+                 trained_registry_size=trained_added)
     return {"round": round_num, "skipped": False, "adapter": adapter,
-            "n_examples": n_examples}
+            "n_examples": n_examples, "trained_registry_size": trained_added}
+
+
+def _round_train_examples(round_num: int) -> list[dict]:
+    """Load the train-split examples for a round (messages only)."""
+    import json
+    f = round_dir(round_num) / "trading_train.jsonl"
+    if not f.exists():
+        return []
+    out = []
+    for line in f.read_text().splitlines():
+        line = line.strip()
+        if line:
+            try:
+                out.append(json.loads(line))
+            except Exception:
+                continue
+    return out
+
+
+def training_coverage(round_num: int) -> dict:
+    """How many of a round's train rows were already used to train (by hash)."""
+    from common.hashing import example_hash, load_trained
+    trained = load_trained()
+    rows = _round_train_examples(round_num)
+    hashes = [example_hash(r) for r in rows]
+    new = [h for h in hashes if h not in trained]
+    return {"round": round_num, "total": len(hashes),
+            "already_trained": len(hashes) - len(new), "new": len(new),
+            "registry_size": len(trained)}

@@ -71,7 +71,7 @@
       <div class="card">
         <h3>Recently generated trades</h3>
         <div class="table-wrap"><table id="dg-table"><thead><tr>
-          <th>Ep</th><th>Symbol</th><th>Date</th><th>Action</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>Exit reason</th>
+          <th>Ep</th><th>Symbol</th><th>Date</th><th>Action</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P&amp;L</th><th>Exit reason</th><th>Reasoning</th>
         </tr></thead><tbody></tbody></table></div>
       </div>
     </section>
@@ -108,6 +108,8 @@
         </div>
         <div class="progress"><div class="bar" id="tr-bar"></div></div>
         <div class="kv" id="tr-status"></div>
+        <h3 style="margin-top:16px">Dataset coverage (what will actually train)</h3>
+        <div class="kv" id="tr-coverage"></div>
       </div>
       <div class="card">
         <h3>Loss curve (train vs val)</h3>

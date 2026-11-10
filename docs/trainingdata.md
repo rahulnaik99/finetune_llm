@@ -60,6 +60,69 @@ thrown away**. On top of that, `service.run_datagen`:
 
 So a crash at episode 37/50 resumes at 38, not 1.
 
+## Parallel generation (faster data gen)
+
+A single agent's episodes are a **sequential chain** — episode N+1 reads the
+capital/date that episode N produced — so they cannot be parallelised without
+changing the simulation's semantics. What *is* embarrassingly parallel is
+running **one independent agent per symbol** (and/or per date-window).
+
+`run_datagen_parallel(symbols=[...])` does exactly that:
+- one **process per symbol** via `ProcessPoolExecutor` → true parallelism past
+  the GIL for the pandas / zone-detection compute;
+- each worker writes to its **own SQLite shard** (`data/shards/…__<symbol>.db`)
+  → zero write-contention;
+- each worker keeps its **own resumable state** (`datagen:<symbol>`), so a crash
+  resumes per-symbol;
+- when a worker finishes, its shard is **merged** into the main `trade_log` with
+  a per-symbol *replace* (idempotent — safe to re-run / resume).
+
+Speedup notes:
+- `backend=fallback` (rule-based) is CPU-bound → near-linear speedup with cores.
+- `backend=ollama` shares one teacher server, so throughput is capped by the
+  teacher; parallelism still helps but less than linearly.
+- The main DB is opened in **WAL** mode with a busy-timeout so the UI can read
+  while merges happen.
+
+```bash
+# CLI — 3 symbols in parallel, 80 episodes each
+python run.py datagen --symbols CANBK,SBIN,HDFCBANK --episodes 80 --workers 3
+
+# API
+curl -X POST localhost:8000/api/datagen/run_parallel \
+  -H 'content-type: application/json' \
+  -d '{"symbols":["CANBK","SBIN","HDFCBANK"],"episodes":80,"backend":"fallback"}'
+```
+
+## Parallel episodes for a single symbol (date-window sharding)
+
+To speed up generation of ONE symbol, the calendar is split into `W`
+non-overlapping windows and one independent agent runs per window **in parallel
+processes** — so different stretches of episodes are produced concurrently
+(episode N's chain stays intact *within* a window). Each window writes its own
+shard + resumable state; all shards are then unioned into the main `trade_log`,
+and the splitter's exact-hash de-dup removes any boundary overlap.
+
+```bash
+python run.py datagen --symbol CANBK --episodes 200 --windows 4   # 4 parallel windows
+curl -X POST localhost:8000/api/datagen/run_windows \
+  -H 'content-type: application/json' \
+  -d '{"symbol":"CANBK","episodes":200,"workers":4,"backend":"fallback"}'
+```
+
+## Fees, taxes & VIX-based sizing
+
+- **Costs**: realised P&L is **net** of brokerage, STT, exchange txn charge,
+  SEBI fee, GST and stamp duty (Indian equity defaults, all `.env`-configurable;
+  `INCLUDE_COSTS=0` restores gross). Gross P&L + the cost figure are kept in the
+  trade's technicals snapshot for traceability.
+- **VIX sizing**: position quantity and target distance scale with the India VIX
+  regime — **low VIX → larger quantity + nearer targets (fewer points)**,
+  **high VIX → smaller quantity + farther targets (more points) + wider stop**.
+  Driven by `data/prices/INDIAVIX.csv` (auto-detected). The CSV loader accepts
+  the `Ticker,Date/Time,…,Close,…` minute format (`DD-MM-YYYY HH:MM:SS`) and
+  resamples to daily.
+
 ## API
 
 | Method | Path | Purpose |
@@ -68,6 +131,7 @@ So a crash at episode 37/50 resumes at 38, not 1.
 | GET | `/api/datagen/state` | Live progress + checkpoint |
 | GET | `/api/datagen/summary?symbol=CANBK` | Episodes already in the DB |
 | GET | `/api/datagen/trades?limit=50` | Recent rows (dataset preview) |
+| POST | `/api/datagen/run_parallel` | Generate several symbols concurrently (see above) |
 
 ## CLI
 

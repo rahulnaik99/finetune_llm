@@ -65,6 +65,12 @@ def view_dataset(round_num: int, split: str = "train", limit: int = 50,
     f = round_dir(round_num) / f"trading_{split}.jsonl"
     if not f.exists():
         return {"round": round_num, "split": split, "total": 0, "rows": []}
+    try:
+        from common.hashing import example_hash, load_trained
+        trained = load_trained()
+    except Exception:
+        example_hash, trained = (lambda e: ""), set()
+
     rows = []
     total = 0
     with open(f) as fh:
@@ -74,9 +80,13 @@ def view_dataset(round_num: int, split: str = "train", limit: int = 50,
             total += 1
             if offset <= i < offset + limit:
                 try:
-                    rows.append(json.loads(line))
+                    ex = json.loads(line)
                 except Exception:
                     continue
+                h = example_hash(ex)
+                ex["_hash"] = h
+                ex["_trained"] = h in trained
+                rows.append(ex)
     return {"round": round_num, "split": split, "total": total, "rows": rows}
 
 

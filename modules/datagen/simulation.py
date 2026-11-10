@@ -43,7 +43,32 @@ except Exception:
 
 import numpy as np
 import pandas as pd
-import requests
+
+# ``requests`` is only needed for the Ollama *teacher* backend (HTTP calls).
+# Import it lazily so offline / rule-based (fallback) / adapter runs — and the
+# test-suite — load fine on a box without ``requests`` installed. The Ollama
+# path calls _require_requests().
+try:
+    import requests  # noqa: F401
+except Exception:      # pragma: no cover - environment dependent
+    requests = None
+
+
+def _require_requests():
+    """Return the requests module or raise a clear, actionable error."""
+    global requests
+    if requests is None:
+        try:
+            import requests as _rq
+            requests = _rq
+        except Exception as exc:  # pragma: no cover
+            raise RuntimeError(
+                "The 'requests' package is required for the Ollama teacher backend "
+                "(USE_OLLAMA=1 / backend='ollama'). Install it (`pip install requests`) "
+                "or generate data offline with the rule-based 'fallback' backend."
+            ) from exc
+    return requests
+
 
 # yfinance is only needed for the ONLINE price/fundamentals source. Import it
 # lazily so the module (and the datagen service / tests) load fine in offline
@@ -109,6 +134,38 @@ VIX_LOW      = float(os.environ.get("VIX_LOW", 13))   # regime thresholds (India
 VIX_NORMAL   = float(os.environ.get("VIX_NORMAL", 18))
 VIX_ELEVATED = float(os.environ.get("VIX_ELEVATED", 25))
 
+# Default to the shipped INDIA VIX file if present and none was configured, so
+# VIX context + volatility-based position sizing are on out of the box.
+if not VIX_CSV:
+    _vix_default = Path(CSV_DIR) / "INDIAVIX.csv"
+    if _vix_default.exists():
+        VIX_CSV = str(_vix_default)
+
+# ── Transaction costs (fees + taxes) — folded into realised P&L ─────────────
+# Indian equity defaults (delivery). All configurable via .env. Set
+# INCLUDE_COSTS=0 to get gross P&L (old behaviour).
+INCLUDE_COSTS   = os.environ.get("INCLUDE_COSTS", "1").strip().lower() in ("1", "true", "yes", "on")
+BROKERAGE_PCT   = float(os.environ.get("BROKERAGE_PCT", 0.0003))   # per leg
+BROKERAGE_MAX   = float(os.environ.get("BROKERAGE_MAX", 20.0))     # per-leg cap (discount broker)
+STT_PCT         = float(os.environ.get("STT_PCT", 0.001))          # both legs (delivery)
+EXCH_TXN_PCT    = float(os.environ.get("EXCH_TXN_PCT", 0.0000297)) # NSE txn charge
+SEBI_PCT        = float(os.environ.get("SEBI_PCT", 0.000001))      # ₹10 / crore
+GST_PCT         = float(os.environ.get("GST_PCT", 0.18))           # on brokerage+txn+sebi
+STAMP_PCT       = float(os.environ.get("STAMP_PCT", 0.00015))      # buy leg only
+
+# ── Volatility-based position sizing (driven by India VIX regime) ───────────
+# Low VIX  → size UP (more quantity), take profit nearer (fewer points).
+# High VIX → size DOWN (less quantity), target farther (more points) + wider SL.
+VIX_SIZING = os.environ.get("VIX_SIZING", "1").strip().lower() in ("1", "true", "yes", "on")
+VIX_QTY_LOW      = float(os.environ.get("VIX_QTY_LOW", 1.5))
+VIX_QTY_NORMAL   = float(os.environ.get("VIX_QTY_NORMAL", 1.0))
+VIX_QTY_ELEVATED = float(os.environ.get("VIX_QTY_ELEVATED", 0.6))
+VIX_QTY_EXTREME  = float(os.environ.get("VIX_QTY_EXTREME", 0.35))
+VIX_DIST_LOW      = float(os.environ.get("VIX_DIST_LOW", 0.8))
+VIX_DIST_NORMAL   = float(os.environ.get("VIX_DIST_NORMAL", 1.0))
+VIX_DIST_ELEVATED = float(os.environ.get("VIX_DIST_ELEVATED", 1.4))
+VIX_DIST_EXTREME  = float(os.environ.get("VIX_DIST_EXTREME", 1.8))
+
 
 # ════════════════════════════════════════════════════════════════════
 #  LLM BACKEND SWITCH
@@ -138,7 +195,7 @@ def _llm_generate(system: str, user: str, temp: float = 0.2) -> str | None:
 
     if mode == "ollama":
         try:
-            r = requests.post(OLLAMA_URL, json={
+            r = _require_requests().post(OLLAMA_URL, json={
                 "model": OLLAMA_MODEL,
                 "messages": [{"role": "system", "content": system},
                              {"role": "user",   "content": user}],
@@ -201,6 +258,14 @@ def _parse_json(text: str | None) -> dict:
 # ════════════════════════════════════════════════════════════════════
 def init_db() -> None:
     with sqlite3.connect(DB_PATH) as con:
+        # WAL + a generous busy timeout let readers (the UI / merge step) and a
+        # writer coexist without "database is locked" errors. Harmless for the
+        # single-writer case; important once several processes touch the DB.
+        try:
+            con.execute("PRAGMA journal_mode=WAL")
+            con.execute("PRAGMA busy_timeout=30000")
+        except Exception:
+            pass
         con.executescript("""
             CREATE TABLE IF NOT EXISTS fundamental_cache (
                 symbol TEXT, as_of_quarter TEXT, data_json TEXT, fetched_at TEXT,
@@ -766,6 +831,55 @@ def compute_pnl(action, entry, exit_p, qty):
     return 0.0
 
 
+def trade_costs(entry: float, exit_p: float, qty: int, action: str) -> float:
+    """Round-trip fees + taxes for one trade (Indian equity, configurable).
+
+    Covers brokerage (per-leg, capped), STT, exchange transaction charge, SEBI
+    turnover fee, GST (on brokerage+txn+sebi) and stamp duty (buy leg). Returns
+    0.0 for HOLD or when INCLUDE_COSTS is off.
+    """
+    if not INCLUDE_COSTS or action not in ("BUY", "SELL") or qty <= 0:
+        return 0.0
+    buy_val = entry * qty
+    sell_val = exit_p * qty
+    turnover = buy_val + sell_val
+    brokerage = (min(BROKERAGE_MAX, buy_val * BROKERAGE_PCT)
+                 + min(BROKERAGE_MAX, sell_val * BROKERAGE_PCT))
+    stt = STT_PCT * turnover
+    exch = EXCH_TXN_PCT * turnover
+    sebi = SEBI_PCT * turnover
+    gst = GST_PCT * (brokerage + exch + sebi)
+    stamp = STAMP_PCT * buy_val
+    return round(brokerage + stt + exch + sebi + gst + stamp, 2)
+
+
+def _vix_regime(vc: dict) -> str:
+    if not vc:
+        return "NORMAL"
+    r = vc.get("regime")
+    if r:
+        return r
+    lvl = vc.get("vix", VIX_NORMAL)
+    return ("LOW" if lvl < VIX_LOW else "NORMAL" if lvl < VIX_NORMAL
+            else "ELEVATED" if lvl < VIX_ELEVATED else "EXTREME")
+
+
+def vix_sizing(vc: dict) -> dict:
+    """VIX regime -> quantity factor + stop/target distance multiplier.
+
+    Low VIX -> bigger size, nearer targets (fewer points).
+    High VIX -> smaller size, farther targets (more points) + wider stop.
+    """
+    regime = _vix_regime(vc)
+    qty = {"LOW": VIX_QTY_LOW, "NORMAL": VIX_QTY_NORMAL,
+           "ELEVATED": VIX_QTY_ELEVATED, "EXTREME": VIX_QTY_EXTREME}.get(regime, 1.0)
+    dist = {"LOW": VIX_DIST_LOW, "NORMAL": VIX_DIST_NORMAL,
+            "ELEVATED": VIX_DIST_ELEVATED, "EXTREME": VIX_DIST_EXTREME}.get(regime, 1.0)
+    if not VIX_SIZING:
+        qty, dist = 1.0, 1.0
+    return {"regime": regime, "qty_factor": qty, "dist_mult": dist}
+
+
 def next_trading_day(date_str, offset=1):
     dt = datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=offset)
     while dt.weekday() >= 5:
@@ -819,11 +933,26 @@ class TradingAgent:
         sl  = float(dec.get("stop_loss", 0))
         tp  = float(dec.get("take_profit", 0))
         rsn = dec.get("reasoning", "—")
-        print(f"     -> {action} qty={qty} SL={sl:.2f} TP={tp:.2f}")
+
+        # Volatility-based position sizing (India VIX regime).
+        vs = vix_sizing(vc)
+        if action in ("BUY", "SELL") and qty > 0:
+            qty = max(1, int(round(qty * vs["qty_factor"])))
+            if vs["dist_mult"] != 1.0 and sl and tp:
+                if action == "BUY":
+                    sl = round(entry_p - (entry_p - sl) * vs["dist_mult"], 2)
+                    tp = round(entry_p + (tp - entry_p) * vs["dist_mult"], 2)
+                else:
+                    sl = round(entry_p + (sl - entry_p) * vs["dist_mult"], 2)
+                    tp = round(entry_p - (entry_p - tp) * vs["dist_mult"], 2)
+        print(f"     -> {action} qty={qty} SL={sl:.2f} TP={tp:.2f} "
+              f"[VIX {vs['regime']} x{vs['qty_factor']}]")
 
         fwd = get_forward_candles(self.symbol, date, MAX_HOLD_DAYS)
         exit_reason, exit_p, exit_date, bars = check_sl_tp(action, entry_p, sl, tp, fwd)
-        pnl = compute_pnl(action, entry_p, exit_p, qty)
+        gross_pnl = compute_pnl(action, entry_p, exit_p, qty)
+        costs = trade_costs(entry_p, exit_p, qty, action)
+        pnl = round(gross_pnl - costs, 2)
         cap_before = self.capital
         self.capital = round(self.capital + pnl, 2)
         self.peak_cap = max(self.peak_cap, self.capital)
@@ -847,6 +976,9 @@ class TradingAgent:
             trade["what_went_wrong"] = analysis.get("what_went_wrong", "—")
 
         tech_snap = {k: v for k, v in tech.items() if k != "_df"}
+        tech_snap["gross_pnl"] = gross_pnl
+        tech_snap["costs"] = costs
+        tech_snap["vix_sizing"] = vs
         with sqlite3.connect(DB_PATH) as con:
             con.execute("""INSERT INTO trade_log (
                 episode,symbol,decision_date,action,entry_price,quantity,stop_loss,

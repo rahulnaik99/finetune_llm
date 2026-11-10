@@ -331,7 +331,17 @@ def build_dataset(
     filtered = [e for e in examples if quality_filter(e, min_confidence, min_rr)]
     print(f"After quality filter: {len(filtered)} examples")
 
-    # Balance + de-dup (fixes memorisation collapse; adds diversity)
+    # Exact (content-hash) de-dup first → guarantees unique rows cheaply.
+    try:
+        from common.hashing import dedup_exact
+        before = len(filtered)
+        filtered = dedup_exact(filtered)
+        if before != len(filtered):
+            print(f"After exact de-dup: {len(filtered)} (removed {before-len(filtered)} identical rows)")
+    except Exception as _e:
+        print(f"(exact de-dup skipped: {_e})")
+
+    # Balance + coarse de-dup (fixes memorisation collapse; adds diversity)
     filtered = balance_and_dedup(filtered, dedup=do_dedup, balance=do_balance, seed=seed)
 
     if len(filtered) < 50:

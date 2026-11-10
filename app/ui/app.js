@@ -86,9 +86,12 @@ async function refreshDatagen() {
     const { trades } = await jget("/datagen/trades?limit=25");
     $("dg-table").querySelector("tbody").innerHTML = (trades || []).map((t) => {
       const cls = t.pnl > 0 ? "pos" : t.pnl < 0 ? "neg" : "";
+      const reason = t.pre_trade_reasoning || "";
+      const short = reason.length > 90 ? reason.slice(0, 90) + "…" : reason;
       return `<tr><td>${fmt(t.episode)}</td><td>${fmt(t.symbol)}</td><td>${fmt(t.decision_date)}</td>
-        <td>${fmt(t.action)}</td><td>${fmt(t.entry_price)}</td><td>${fmt(t.exit_price)}</td>
-        <td class="${cls}">${t.pnl != null ? t.pnl.toFixed(0) : "—"}</td><td>${fmt(t.exit_reason)}</td></tr>`;
+        <td>${fmt(t.action)}</td><td>${fmt(t.quantity)}</td><td>${fmt(t.entry_price)}</td><td>${fmt(t.exit_price)}</td>
+        <td class="${cls}">${t.pnl != null ? t.pnl.toFixed(0) : "—"}</td><td>${fmt(t.exit_reason)}</td>
+        <td class="reason" title="${escapeHtml(reason)}">${escapeHtml(short) || "—"}</td></tr>`;
     }).join("");
   } catch (e) {}
 }
@@ -113,8 +116,14 @@ $("ds-load").onclick = async () => {
     const split = $("ds-split").value;
     const d = await jget(`/splitter/dataset?round_num=${rn}&split=${split}&limit=25`);
     $("ds-meta").innerHTML = `<div><b>Round</b>${d.round}</div><div><b>Split</b>${d.split}</div><div><b>Total</b>${d.total}</div>`;
-    $("ds-rows").innerHTML = (d.rows || []).map((r) =>
-      `<pre>${escapeHtml(JSON.stringify(r, null, 2))}</pre>`).join("") || '<p class="hint">Empty split.</p>';
+    $("ds-rows").innerHTML = (d.rows || []).map((r) => {
+      const badge = r._trained
+        ? '<span class="badge done">trained</span>'
+        : '<span class="badge pending">new</span>';
+      const hid = r._hash ? ` <code>${r._hash}</code>` : "";
+      return `<div class="jrow"><div class="jhead">${badge}${hid}</div>`
+        + `<pre>${escapeHtml(JSON.stringify(r, null, 2))}</pre></div>`;
+    }).join("") || '<p class="hint">Empty split.</p>';
   } catch (e) { alert("Dataset: " + e.message); }
 };
 function escapeHtml(s) { return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
@@ -135,6 +144,15 @@ async function refreshTraining() {
     renderStatus($("tr-status"), st);
     const loss = (st.history || []).filter((h) => h.event === "loss");
     drawLoss($("tr-chart"), loss);
+    try {
+      const rn = parseInt($("tr-round").value || "1", 10);
+      const cov = await jget(`/training/coverage?round_num=${rn}`);
+      $("tr-coverage").innerHTML =
+        `<div><b>Train rows</b>${fmt(cov.total)}</div>` +
+        `<div><b>New (not yet trained)</b>${fmt(cov.new)}</div>` +
+        `<div><b>Already trained</b>${fmt(cov.already_trained)}</div>` +
+        `<div><b>Registry size</b>${fmt(cov.registry_size)}</div>`;
+    } catch (e) {}
   } catch (e) {}
 }
 

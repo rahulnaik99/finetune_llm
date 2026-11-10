@@ -21,6 +21,28 @@ class DatagenRequest(BaseModel):
     resume: bool = Field(True, description="Continue from the last checkpoint instead of restarting")
 
 
+class DatagenParallelRequest(BaseModel):
+    symbols: list[str] = Field(..., description="NSE symbols to simulate in parallel",
+                               examples=[["CANBK", "SBIN", "HDFCBANK"]])
+    start_date: str = Field("2024-01-10", description="First simulation day (YYYY-MM-DD)")
+    episodes: int = Field(50, ge=1, le=5000, description="Episodes per symbol")
+    backend: str = Field("fallback", description="fallback | ollama | adapter")
+    adapter_path: Optional[str] = Field(None, description="Adapter path when backend='adapter'")
+    resume: bool = Field(True, description="Continue each symbol from its last checkpoint")
+    max_workers: Optional[int] = Field(None, ge=1, le=64,
+                                       description="Parallel worker processes (default: #symbols vs #CPUs)")
+
+
+class DatagenWindowsRequest(BaseModel):
+    symbol: str = Field("CANBK", description="One NSE symbol to generate in parallel windows")
+    start_date: str = Field("2024-01-10")
+    episodes: int = Field(100, ge=1, le=20000, description="Total episodes (split across windows)")
+    workers: int = Field(4, ge=1, le=64, description="Parallel date-windows (processes)")
+    backend: str = Field("fallback")
+    adapter_path: Optional[str] = None
+    resume: bool = Field(True)
+
+
 class SplitRequest(BaseModel):
     round_num: int = Field(1, ge=1, description="Round bucket to write the dataset into")
     min_confidence: float = Field(0.5, ge=0.0, le=1.0)
