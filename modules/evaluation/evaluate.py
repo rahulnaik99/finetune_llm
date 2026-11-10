@@ -71,20 +71,27 @@ def evaluate_model_quality(test_path: str, generate_fn) -> dict:
     rows = [json.loads(l) for l in open(test_path) if l.strip()]
     n = len(rows)
     jv = sch = rz = fu = am = 0
+    n_decision = 0            # only PRE-TRADE (decision) rows have action/SL/TP
     for ex in rows:
         sys_c, usr_c, ref_txt = _messages(ex)
         pred = generate_fn(sys_c, usr_c)
         d = _parse_json_block(pred)
         ref = _parse_json_block(ref_txt)
         if d: jv += 1
-        if d and all(k in d for k in REQUIRED_KEYS): sch += 1
-        if d.get("reasoning", "").strip() not in ("", "—"): rz += 1
+        if str(d.get("reasoning") or "").strip() not in ("", "—"): rz += 1
         if isinstance(d.get("features_used"), list) and d["features_used"]: fu += 1
-        if d.get("action") and d.get("action") == ref.get("action"): am += 1
-    pct = lambda x: round(100 * x / n, 1) if n else 0.0
-    return {"n": n, "json_validity": pct(jv), "schema_ok": pct(sch),
-            "reasoning_ok": pct(rz), "features_used_ok": pct(fu),
-            "action_match": pct(am)}
+        # Schema + action-match only make sense for decision rows (post-trade
+        # "lesson" rows have no action/SL/TP and must not pollute these scores).
+        if ref.get("action"):
+            n_decision += 1
+            if d and all(k in d for k in REQUIRED_KEYS): sch += 1
+            if d.get("action") and d.get("action") == ref.get("action"): am += 1
+    pct = lambda x, base=n: round(100 * x / base, 1) if base else 0.0
+    return {"n": n, "n_decision": n_decision,
+            "json_validity": pct(jv), "reasoning_ok": pct(rz),
+            "features_used_ok": pct(fu),
+            "schema_ok": pct(sch, n_decision),
+            "action_match": pct(am, n_decision)}
 
 
 # ── B) trading metrics ───────────────────────────────────────────────────────
@@ -126,7 +133,9 @@ def trading_metrics(pnls: list[float]) -> dict:
         "avg_win": round(gross_win / len(wins), 2) if wins else 0.0,
         "avg_loss": round(-gross_loss / len(losses), 2) if losses else 0.0,
         "expectancy": round(mean, 2),                      # avg P&L per trade
-        "profit_factor": round(gross_win / gross_loss, 2) if gross_loss > 0 else float("inf"),
+        # JSON-safe: float('inf') makes FastAPI's JSON encoder 500 on
+        # /evaluation/metrics. Use None ("undefined — no losing trades") instead.
+        "profit_factor": round(gross_win / gross_loss, 2) if gross_loss > 0 else None,
         "sharpe_per_trade": sharpe,
         "sortino_per_trade": sortino,
         "t_stat": t_stat,                                  # edge significance

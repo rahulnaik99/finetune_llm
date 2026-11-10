@@ -484,6 +484,18 @@ def main():
     hw = detect_hardware()
     method = args.force_method or hw["recommended_method"]
 
+    # On an MLX path, a plain HF base-model id won't load; prefer params.yaml's
+    # mlx_model (reconciles the 3 historical id variants into one canonical pair).
+    if method.startswith("mlx") and params_file.exists():
+        try:
+            import yaml as _y
+            _pm = _y.safe_load(params_file.read_text()) or {}
+            _hf_default = (_pm.get("base_model") or "nvidia/Nemotron-Nano-4B-Instruct")
+            if cfg.get("model") in (None, _hf_default) and _pm.get("mlx_model"):
+                cfg["model"] = _pm["mlx_model"]
+        except Exception:
+            pass
+
     print("=" * 60)
     print("  TRADING AGENT — LLM Fine-tuning")
     print("=" * 60)

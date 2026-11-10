@@ -2,6 +2,9 @@
 # ─────────────────
 # Install all at once:  pip install -r requirements.txt
 #
+# NOTE: for a fully reproducible build use a lock file (uv pip compile /
+# pip-tools / poetry). The bounds below are compatible-release guards, not a lock.
+#
 # Platform notes:
 #   Apple Silicon:  mlx-lm is required, bitsandbytes is NOT needed
 #   NVIDIA GPU:     bitsandbytes is required, mlx-lm is NOT needed
@@ -17,25 +20,25 @@ ipywidgets>=8.0
 jupyter>=1.0
 
 # ── Production data layer ─────────────────────────────────────────────────────
-polars>=0.20          # fast DataFrames (replaces pandas for large data)
-duckdb>=0.10          # SQL on Parquet — no full file load needed
+polars>=0.20,<2.0     # fast DataFrames (replaces pandas for large data)
+duckdb>=0.10,<2.0     # SQL on Parquet — no full file load needed
 pyarrow>=14.0         # Parquet I/O backend
 
 # ── MLflow (all platforms) ────────────────────────────────────────────────────
-mlflow>=2.10
+mlflow>=2.10,<3.0
 
 # ── DVC pipeline (all platforms) ─────────────────────────────────────────────
-dvc>=3.0
-dvc-s3>=3.0            # for S3 remote storage (optional)
+dvc>=3.0,<4.0
+dvc-s3>=3.0,<4.0            # for S3 remote storage (optional)
 
 # ── Prefect orchestration ──────────────────────────────────────────────────────
-prefect>=2.14
+prefect>=2.14,<3.0   # Prefect 3 moved task_input_hash; flows.py targets 2.x
 
 # ── Monitoring ────────────────────────────────────────────────────────────────
-evidently>=0.4
+evidently>=0.4,<0.5
 
 # ── HuggingFace stack (all platforms — needed for tokenizer) ─────────────────
-transformers>=4.40
+transformers>=4.40,<5.0
 datasets>=2.18
 tokenizers>=0.19
 

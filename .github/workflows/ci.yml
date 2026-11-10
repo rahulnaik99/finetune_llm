@@ -1,6 +1,5 @@
 name: CI
 
-# Build + test gate that runs on every commit / PR, as required.
 on:
   push:
     branches: ["**"]
@@ -15,27 +14,17 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-
-      - name: Install test dependencies
-        run: |
+      - run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
-
-      - name: Byte-compile all modules (fast build check)
-        run: python -m compileall -q common modules app run.py
-
-      - name: Run test suite
-        run: pytest -q --maxfail=1
+      - run: python -m compileall -q common modules app run.py
+      - run: pytest -q --maxfail=1
 
   lint:
     name: Smoke import check
@@ -47,5 +36,4 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements-dev.txt
-      - name: Import the FastAPI app
-        run: python -c "import app.main; print('app import OK:', app.main.app.title)"
+      - run: python -c "import app.main; print('app import OK:', app.main.app.title)"

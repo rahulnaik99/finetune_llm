@@ -47,11 +47,19 @@ def generate_mlx(
     ]
     prompt = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True)
-    response = generate(
-        model, tokenizer,
-        prompt=prompt,
-        max_tokens=max_tokens,
-        temp=temperature,
-        verbose=False,
-    )
+    # mlx-lm renamed the sampling kwarg across versions (temp -> sampler) and
+    # tightened signatures. Try the modern call, then fall back gracefully so a
+    # version bump can't raise TypeError at runtime.
+    try:
+        from mlx_lm.sample_utils import make_sampler
+        response = generate(model, tokenizer, prompt=prompt,
+                            max_tokens=max_tokens,
+                            sampler=make_sampler(temp=temperature), verbose=False)
+    except Exception:
+        try:
+            response = generate(model, tokenizer, prompt=prompt,
+                                max_tokens=max_tokens, temp=temperature, verbose=False)
+        except TypeError:
+            response = generate(model, tokenizer, prompt=prompt,
+                                max_tokens=max_tokens, verbose=False)
     return response

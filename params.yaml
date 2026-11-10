@@ -35,7 +35,7 @@ test_ratio:     0.1
 # ── Model ─────────────────────────────────────────────────────────────────────
 base_model: "nvidia/Nemotron-Nano-4B-Instruct"
 # MLX community provides pre-quantised versions for Apple Silicon:
-mlx_model:  "mlx-community/Nemotron-Nano-4B-Instruct-4bit"
+mlx_model:  "mlx-community/NVIDIA-Nemotron-3.5-Bolt-E4B-OptiQ-4bit"   # canonical MLX id (matches .env)
 
 # ── LoRA hyperparameters ──────────────────────────────────────────────────────
 # r (rank): higher = more capacity but more VRAM and slower

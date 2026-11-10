@@ -75,10 +75,13 @@ def run_flywheel(
                               prev_adapter=current_adapter, resume=True)
             current_adapter = tr.get("adapter") or current_adapter or find_adapter(rnd)
         except Exception as exc:
+            # Do NOT advance last_round_done — a failed round must be RETRIED on
+            # the next resume, not skipped forever. Record and stop here.
             results.append({"round": rnd, "trained": False, "error": str(exc)})
-            store.checkpoint(last_round_done=rnd, rounds=results,
-                             current_adapter=current_adapter)
-            continue
+            store.checkpoint(rounds=results, current_adapter=current_adapter)
+            store.fail(f"Round {rnd} training failed: {exc}. Resume to retry.")
+            return {"rounds": results, "final_adapter": current_adapter,
+                    "failed_round": rnd}
 
         # 4) evaluate on the walk-forward test split
         store.update(message=f"Round {rnd}/{rounds}: evaluation")

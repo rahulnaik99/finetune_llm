@@ -17,9 +17,11 @@ import json
 from pathlib import Path
 from typing import Iterable
 
-from .paths import STATE_DIR
+from .paths import OUTPUT_DIR, STATE_DIR
 
-_REGISTRY = STATE_DIR / "trained_examples.json"
+# Keep the registry OUT of STATE_DIR so it doesn't show up as a bogus
+# 'stage' on the UI status board (all_states globs STATE_DIR/*.json).
+_REGISTRY = OUTPUT_DIR / "trained_examples.json"
 
 
 def example_hash(ex: dict) -> str:
@@ -44,7 +46,7 @@ def load_trained() -> set[str]:
 
 def add_trained(hashes: Iterable[str]) -> int:
     """Register hashes as 'used for training'. Returns the new registry size."""
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    _REGISTRY.parent.mkdir(parents=True, exist_ok=True)
     current = load_trained()
     current.update(h for h in hashes if h)
     tmp = _REGISTRY.with_suffix(".tmp")

@@ -41,6 +41,10 @@ def _manual_checks(df: pd.DataFrame) -> list[str]:
     bad_hl = (num["high"] < num["low"]).sum()
     if bad_hl:
         errors.append(f"{int(bad_hl)} rows where high < low")
+    if "volume" in df.columns:
+        vol = pd.to_numeric(df["volume"], errors="coerce")
+        if (vol < 0).any():
+            errors.append("negative volume present")
     return errors
 
 

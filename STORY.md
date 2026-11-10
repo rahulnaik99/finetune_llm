@@ -72,6 +72,10 @@ system is built to **never lose work**:
    evaluation bug (stripped `_meta`).
 2. **Day 2** — made the simulator import **offline** (no `yfinance`/`requests`
    needed for rule-based runs).
+3. **Days 5–7** — external audits hardened the pipeline: fixed look-ahead
+   leakage in the prompt history, made data generation non-overlapping and
+   `params.yaml`-authoritative, deepened MLflow tracking, and tightened
+   dependency pins. (See TIMELINE.md.)
 3. **Day 3** — parallel episodes for one symbol, multi-day resume guarantees,
    reasoning visible in the UI, train-coverage/unique-row tracking, fees & taxes
    in P&L, and VIX-based position sizing with your VIX CSV format.

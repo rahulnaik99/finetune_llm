@@ -22,7 +22,7 @@ router = APIRouter(prefix="/evaluation", tags=["evaluation"])
 def start(req: EvalRequest) -> JobAccepted:
     def _job() -> None:
         run_eval(round_num=req.round_num, adapter_path=req.adapter_path,
-                 model_quality=req.model_quality)
+                 model_quality=req.model_quality, force=req.force)
 
     if not jobs.launch(STAGE, _job):
         raise HTTPException(409, "An evaluation job is already running")

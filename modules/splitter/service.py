@@ -122,15 +122,16 @@ def run_split(
         return {"round": round_num, "skipped": True, "counts": counts}
 
     store.start(total=1, message=f"Building dataset for {out_dir.name}")
-    os.environ["SPLIT_MODE"] = split_mode
 
     from data_pipeline import build_dataset  # lazy
 
     out_path = str(out_dir / "trading.jsonl")
+    # Pass split_mode explicitly instead of mutating the global process env.
     counts = build_dataset(
         db_path=db, out_path=out_path,
         min_confidence=min_confidence, min_rr=min_rr,
         val_ratio=val_ratio, test_ratio=test_ratio,
+        split_mode=split_mode,
     )
     store.update(current=1)
     store.finish(message=f"{out_dir.name}: train {counts.get('train',0)} / "

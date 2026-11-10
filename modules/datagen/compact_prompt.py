@@ -13,7 +13,8 @@ from datetime import datetime
 # ── System prompt: concise contract, no repeated JSON schema ─────────────────
 SYSTEM_PRE = """You are a disciplined NSE equity trader. Protect capital first.
 Rule: R:R must be >= 1.5. Max risk 2% per trade. HOLD if setup unclear.
-Output JSON: action|qty|stop_loss|take_profit|risk_reward|reasoning|confidence|key_risk"""
+Output JSON: action|qty|stop_loss|take_profit|risk_reward|reasoning|confidence|features_used|key_risk
+(features_used = list of signals you relied on, e.g. ema_stack, vwap, nearest_support)"""
 
 SYSTEM_POST = """Review the completed trade and extract one concrete lesson.
 Output JSON: outcome|exit_reason_analysis|what_went_right|what_went_wrong|lesson_learned|strategy_adjustment"""

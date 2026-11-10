@@ -40,14 +40,14 @@ RUNNING = "running"
 DONE = "done"
 FAILED = "failed"
 
-_LOCKS: dict[str, threading.Lock] = {}
+_LOCKS: dict[str, 'threading.RLock'] = {}   # RLock so mutators can hold across load+save
 _LOCKS_GUARD = threading.Lock()
 
 
-def _lock_for(name: str) -> threading.Lock:
+def _lock_for(name: str) -> 'threading.RLock':
     with _LOCKS_GUARD:
         if name not in _LOCKS:
-            _LOCKS[name] = threading.Lock()
+            _LOCKS[name] = threading.RLock()
         return _LOCKS[name]
 
 
@@ -105,8 +105,11 @@ class StateStore:
         self.stage = stage
         self.dir = Path(state_dir) if state_dir else STATE_DIR
         self.dir.mkdir(parents=True, exist_ok=True)
-        self.path = self.dir / f"{stage}.json"
-        self._lock = _lock_for(stage)
+        # Sanitise the filename — ':' (used in per-symbol stages like
+        # "datagen:CANBK") is illegal on Windows. The logical stage name is kept.
+        safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in stage)
+        self.path = self.dir / f"{safe}.json"
+        self._lock = _lock_for(safe)
 
     # ── read ─────────────────────────────────────────────────────────────────
     def load(self) -> JobState:
@@ -133,58 +136,64 @@ class StateStore:
 
     # ── convenience mutators ─────────────────────────────────────────────────
     def start(self, total: int = 0, message: str = "", reset: bool = False) -> JobState:
-        st = JobState(stage=self.stage) if reset else self.load()
-        st.status = RUNNING
-        st.total = total or st.total
-        st.message = message
-        st.error = ""
-        st.started_at = st.started_at or time.time()
-        st.finished_at = None
-        self.save(st)
-        return st
+        with self._lock:
+            st = JobState(stage=self.stage) if reset else self.load()
+            st.status = RUNNING
+            st.total = total or st.total
+            st.message = message
+            st.error = ""
+            st.started_at = st.started_at or time.time()
+            st.finished_at = None
+            self.save(st)
+            return st
 
     def update(self, **fields: Any) -> JobState:
-        st = self.load()
-        for k, v in fields.items():
-            setattr(st, k, v)
-        if st.total:
-            st.progress = min(1.0, st.current / st.total)
-        self.save(st)
-        return st
+        with self._lock:                       # atomic load-modify-save
+            st = self.load()
+            for k, v in fields.items():
+                setattr(st, k, v)
+            if st.total:
+                st.progress = min(1.0, st.current / st.total)
+            self.save(st)
+            return st
 
     def log(self, entry: dict[str, Any]) -> JobState:
         """Append a timeline entry (used for training-loss / eval-metric charts)."""
-        st = self.load()
-        entry = {"t": time.time(), **entry}
-        st.history.append(entry)
-        self.save(st)
-        return st
+        with self._lock:
+            st = self.load()
+            entry = {"t": time.time(), **entry}
+            st.history.append(entry)
+            self.save(st)
+            return st
 
     def checkpoint(self, **kv: Any) -> JobState:
-        st = self.load()
-        st.checkpoint.update(kv)
-        self.save(st)
-        return st
+        with self._lock:
+            st = self.load()
+            st.checkpoint.update(kv)
+            self.save(st)
+            return st
 
     def finish(self, message: str = "", **checkpoint: Any) -> JobState:
-        st = self.load()
-        st.status = DONE
-        st.progress = 1.0
-        if st.total:
-            st.current = st.total
-        st.message = message or st.message
-        st.checkpoint.update(checkpoint)
-        st.finished_at = time.time()
-        self.save(st)
-        return st
+        with self._lock:
+            st = self.load()
+            st.status = DONE
+            st.progress = 1.0
+            if st.total:
+                st.current = st.total
+            st.message = message or st.message
+            st.checkpoint.update(checkpoint)
+            st.finished_at = time.time()
+            self.save(st)
+            return st
 
     def fail(self, error: str) -> JobState:
-        st = self.load()
-        st.status = FAILED
-        st.error = str(error)
-        st.finished_at = time.time()
-        self.save(st)
-        return st
+        with self._lock:
+            st = self.load()
+            st.status = FAILED
+            st.error = str(error)
+            st.finished_at = time.time()
+            self.save(st)
+            return st
 
 
 def all_states(state_dir: Path | None = None) -> dict[str, dict[str, Any]]:
@@ -193,7 +202,10 @@ def all_states(state_dir: Path | None = None) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     if not d.exists():
         return out
+    _DENY = {"trained_examples"}   # not a stage — a hash registry
     for f in sorted(d.glob("*.json")):
+        if f.stem in _DENY:
+            continue
         try:
             out[f.stem] = json.loads(f.read_text())
         except Exception:

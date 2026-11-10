@@ -26,6 +26,15 @@ from common.state import StateStore
 
 STAGE = "training"
 
+
+def _mlflow():
+    """Return the mlflow module if installed + configured, else None (no-op)."""
+    try:
+        import mlflow  # noqa
+        return mlflow
+    except Exception:
+        return None
+
 # Matches the numbers MLX-LoRA and HF trainers print, e.g.
 #   "Iter 100: Train loss 0.812, ... Val loss 0.456"
 _ITER_RE = re.compile(r"[Ii]ter\s+(\d+)")
@@ -56,15 +65,31 @@ def _merge_train_sets(round_num: int) -> Path:
 
 def run_training(
     round_num: int = 1,
-    base_model: str = "mlx-community/NVIDIA-Nemotron-3.5-Bolt-E4B-OptiQ-4bit",
+    base_model: Optional[str] = None,
     prev_adapter: Optional[str] = None,
-    iters: int = 600,
-    epochs: int = 2,
-    lora_r: int = 16,
-    save_every: int = 100,
+    iters: Optional[int] = None,
+    epochs: Optional[int] = None,
+    lora_r: Optional[int] = None,
+    save_every: Optional[int] = None,
     resume: bool = True,
 ) -> dict:
-    """Fine-tune on the accumulated buffer for ``round_num``."""
+    """Fine-tune on the accumulated buffer for ``round_num``.
+
+    Hyper-parameters resolve from params.yaml when not explicitly given, so
+    params.yaml is the single source of truth (an explicit arg still overrides).
+    """
+    import os
+    from common.params import load_params
+    pm = load_params()
+    # resolution order: explicit arg → params.yaml → hardcoded fallback
+    iters = iters if iters is not None else int(pm.get("mlx_iters", 600))
+    epochs = epochs if epochs is not None else int(pm.get("num_epochs", 2))
+    lora_r = lora_r if lora_r is not None else int(pm.get("lora_r", 16))
+    save_every = save_every if save_every is not None else int(pm.get("save_every", 100))
+    if base_model is None:
+        base_model = (os.environ.get("BASE_MODEL")
+                      or pm.get("base_model")
+                      or "mlx-community/NVIDIA-Nemotron-3.5-Bolt-E4B-OptiQ-4bit")
     ensure_dirs()
     store = StateStore(STAGE)
 
@@ -81,11 +106,32 @@ def run_training(
     out_dir = ADAPTER_DIR / f"round_{round_num:02d}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    start_from = prev_adapter if (prev_adapter and Path(prev_adapter).exists()) else base_model
+    # An LoRA adapter directory is NOT a loadable base model. For continual
+    # learning we start from the previous round's *fused* model if one exists,
+    # otherwise from the base model. (Passing a bare adapter as --model was a bug.)
+    start_from = base_model
+    if prev_adapter:
+        pa = Path(prev_adapter)
+        fused = pa if pa.name == "fused_model" else pa.parent / "fused_model"
+        if fused.exists():
+            start_from = str(fused)
 
     store.start(total=iters, message=f"Training round {round_num} on {n_examples} examples")
     store.checkpoint(round=round_num, base_model=base_model, start_from=start_from,
                      n_examples=n_examples)
+
+    mlf = _mlflow()
+    mlf_run_id = None
+    if mlf:
+        try:
+            run = mlf.start_run(run_name=f"round_{round_num:02d}")
+            mlf_run_id = run.info.run_id
+            mlf.log_params({"round": round_num, "base_model": base_model,
+                            "iters": iters, "epochs": epochs, "lora_r": lora_r,
+                            "n_examples": n_examples})
+            store.checkpoint(mlflow_run_id=mlf_run_id)   # let eval attach to this run
+        except Exception:
+            mlf = None
 
     train_py = Path(__file__).resolve().parent / "train.py"
     cmd = [
@@ -118,12 +164,25 @@ def run_training(
             if m_vl:
                 entry["val_loss"] = float(m_vl.group(1))
             store.log(entry)
+            if mlf:
+                try:
+                    step = entry.get("iter")
+                    if "train_loss" in entry:
+                        mlf.log_metric("train_loss", entry["train_loss"], step=step)
+                    if "val_loss" in entry:
+                        mlf.log_metric("val_loss", entry["val_loss"], step=step)
+                except Exception:
+                    pass
             if m_iter:
                 store.update(current=int(m_iter.group(1)),
                              message=f"round {round_num}: iter {m_iter.group(1)}/{iters}")
-    proc.wait()
+    rc = proc.wait()
 
     adapter = find_adapter(round_num)
+    if rc != 0:
+        msg = f"Training subprocess exited with code {rc} (round {round_num})."
+        store.fail(msg)
+        raise RuntimeError(msg)
     if adapter is None:
         msg = (f"Training produced no adapter in {out_dir}. "
                "On Mac: pip install mlx-lm. On NVIDIA: pip install torch peft trl bitsandbytes.")
@@ -147,9 +206,16 @@ def run_training(
     except Exception:
         pass
 
+    if mlf:
+        try:
+            mlf.log_metric("trained_examples", trained_added)
+            mlf.set_tag("adapter", adapter)
+            mlf.end_run()
+        except Exception:
+            pass
     store.finish(message=f"round_{round_num:02d} trained → {adapter}",
                  adapter=adapter, round=round_num, skipped=False,
-                 trained_registry_size=trained_added)
+                 trained_registry_size=trained_added, mlflow_run_id=mlf_run_id)
     return {"round": round_num, "skipped": False, "adapter": adapter,
             "n_examples": n_examples, "trained_registry_size": trained_added}
 

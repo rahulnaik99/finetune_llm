@@ -55,7 +55,7 @@ def main() -> None:
     sp.add_argument("--force", action="store_true")
 
     tr = sub.add_parser("train"); tr.add_argument("--round", type=int, default=1)
-    tr.add_argument("--iters", type=int, default=600); tr.add_argument("--no-resume", action="store_true")
+    tr.add_argument("--iters", type=int, default=None); tr.add_argument("--no-resume", action="store_true")
 
     ev = sub.add_parser("eval"); ev.add_argument("--round", type=int, default=1)
     ev.add_argument("--quality", action="store_true")

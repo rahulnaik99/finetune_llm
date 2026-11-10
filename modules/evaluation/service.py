@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import hashlib
+import os
 from typing import Optional
 
 from common.paths import METRICS_DIR, ensure_dirs, round_dir
@@ -25,14 +27,30 @@ from common.state import StateStore
 STAGE = "evaluation"
 
 
-def load_cached(round_num: int) -> Optional[dict]:
+def _test_fingerprint(round_num: int) -> str:
+    """Fingerprint the test split (+ its _meta sidecar) so a cache from a
+    different / re-split test set is not silently reused."""
+    h = hashlib.sha256()
+    for name in (f"trading_test.jsonl", f"trading_test_meta.jsonl"):
+        f = round_dir(round_num) / name
+        if f.exists():
+            st = os.stat(f)
+            h.update(f"{name}:{st.st_size}:{int(st.st_mtime)}".encode())
+    return h.hexdigest()[:16]
+
+
+def load_cached(round_num: int, fingerprint: Optional[str] = None) -> Optional[dict]:
     f = METRICS_DIR / f"eval_round_{round_num:02d}.json"
-    if f.exists():
-        try:
-            return json.loads(f.read_text())
-        except Exception:
-            return None
-    return None
+    if not f.exists():
+        return None
+    try:
+        data = json.loads(f.read_text())
+    except Exception:
+        return None
+    # Reject a cache whose test set has changed since it was written.
+    if fingerprint is not None and data.get("_fingerprint") not in (None, fingerprint):
+        return None
+    return data
 
 
 def run_eval(
@@ -43,6 +61,16 @@ def run_eval(
 ) -> dict:
     ensure_dirs()
     store = StateStore(STAGE)
+
+    # Honour the cache (the docs promised this; `force` was previously ignored).
+    fp = _test_fingerprint(round_num)
+    if not force:
+        cached = load_cached(round_num, fingerprint=fp)
+        if cached is not None:
+            store.finish(message=f"round_{round_num:02d}: reused cached metrics",
+                         round=round_num, cached=True)
+            return cached
+
     store.start(total=1, message=f"Evaluating round {round_num}")
 
     test_path = round_dir(round_num) / "trading_test.jsonl"
@@ -69,8 +97,29 @@ def run_eval(
             except Exception as exc:
                 out["quality_error"] = str(exc)
 
-    # Cache + record.
-    (METRICS_DIR / f"eval_round_{round_num:02d}.json").write_text(json.dumps(out, indent=2))
+    # Cache + record (fingerprint ties the cache to this exact test set).
+    out["_fingerprint"] = fp
+    cache_file = METRICS_DIR / f"eval_round_{round_num:02d}.json"
+    cache_file.write_text(json.dumps(out, indent=2))
+
+    # Attach eval metrics to the training MLflow run (linked across stages) so
+    # experiments are comparable beyond hyper-parameters. No-op without MLflow.
+    try:
+        import mlflow
+        run_id = StateStore("training").load().checkpoint.get("mlflow_run_id")
+        ctx = mlflow.start_run(run_id=run_id) if run_id else mlflow.start_run(
+            run_name=f"eval-round-{round_num:02d}")
+        with ctx:
+            for k, v in (out.get("trading") or {}).items():
+                if isinstance(v, (int, float)):
+                    mlflow.log_metric(f"test_{k}", v)
+            wf = out.get("walk_forward") or {}
+            if isinstance(wf.get("expectancy_mean"), (int, float)):
+                mlflow.log_metric("wf_expectancy_mean", wf["expectancy_mean"])
+                mlflow.log_metric("wf_profitable_folds", wf.get("profitable_folds", 0))
+            mlflow.log_artifact(str(cache_file))
+    except Exception:
+        pass
     tm = out.get("trading", {})
     store.log({"event": "eval", "round": round_num,
                "win_rate": tm.get("win_rate"), "expectancy": tm.get("expectancy"),

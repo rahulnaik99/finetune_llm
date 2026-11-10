@@ -55,12 +55,15 @@ class SplitRequest(BaseModel):
 
 class TrainRequest(BaseModel):
     round_num: int = Field(1, ge=1)
-    base_model: str = Field("mlx-community/NVIDIA-Nemotron-3.5-Bolt-E4B-OptiQ-4bit")
+    # None → fall back to params.yaml then a hardcoded default (so params.yaml is
+    # authoritative and an explicit value still overrides). Avoids the old bug
+    # where the service always sent its own defaults, silently beating params.yaml.
+    base_model: Optional[str] = None
     prev_adapter: Optional[str] = None
-    iters: int = Field(600, ge=1)
-    epochs: int = Field(2, ge=1)
-    lora_r: int = Field(16, ge=1)
-    save_every: int = Field(100, ge=1)
+    iters: Optional[int] = Field(None, ge=1)
+    epochs: Optional[int] = Field(None, ge=1)
+    lora_r: Optional[int] = Field(None, ge=1)
+    save_every: Optional[int] = Field(None, ge=1)
     resume: bool = Field(True, description="Skip if this round's adapter already exists")
 
 
@@ -68,6 +71,7 @@ class EvalRequest(BaseModel):
     round_num: int = Field(1, ge=1)
     adapter_path: Optional[str] = None
     model_quality: bool = Field(False, description="Also run model-quality eval (needs MLX model)")
+    force: bool = Field(False, description="Recompute even if a cached result exists")
 
 
 class FlywheelRequest(BaseModel):

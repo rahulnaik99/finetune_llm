@@ -27,9 +27,16 @@ from common.paths import DB_PATH, METRICS_DIR, PROJECT_ROOT
 GEN_DIR = PROJECT_ROOT / "docs" / "generated"
 
 
-def _latest_eval() -> Optional[dict]:
+def _latest_eval(round_num: Optional[int] = None) -> Optional[dict]:
     if not METRICS_DIR.exists():
         return None
+    if round_num is not None:
+        f = METRICS_DIR / f"eval_round_{round_num:02d}.json"
+        if f.exists():
+            try:
+                return json.loads(f.read_text())
+            except Exception:
+                return None
     cards = sorted(METRICS_DIR.glob("eval_round_*.json"))
     if not cards:
         return None
@@ -61,7 +68,7 @@ def _db_stats(db_path: Optional[str] = None) -> dict:
 def generate_model_card(round_num: Optional[int] = None) -> str:
     """Write docs/generated/MODEL_CARD.md from the latest eval + config."""
     GEN_DIR.mkdir(parents=True, exist_ok=True)
-    ev = _latest_eval() or {}
+    ev = _latest_eval(round_num) or {}
     tm = ev.get("trading", {}) or {}
     wf = ev.get("walk_forward", {}) or {}
     base_model = os.environ.get("BASE_MODEL", "mlx-community/NVIDIA-Nemotron-3.5-Bolt-E4B-OptiQ-4bit")

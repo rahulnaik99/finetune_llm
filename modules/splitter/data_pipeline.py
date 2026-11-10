@@ -34,6 +34,7 @@ Output ONLY valid JSON:
   "risk_reward": <float>,
   "reasoning": "<2-3 sentences citing specific prices and indicator values>",
   "confidence": <0.0-1.0>,
+  "features_used": ["<signals you used, e.g. ema_stack, vwap, nearest_support>"],
   "key_risk": "<one-line failure scenario>"
 }"""
 
@@ -60,7 +61,7 @@ def load_trades(db_path: str) -> list[dict]:
               AND pre_trade_reasoning IS NOT NULL
               AND lesson_learned IS NOT NULL
               AND lesson_learned != '—'
-            ORDER BY created_at
+            ORDER BY decision_date, created_at
         """).fetchall()
     return [dict(r) for r in rows]
 
@@ -98,9 +99,16 @@ def build_pre_trade_example(trade: dict, prev_trades: list[dict]) -> dict | None
     """Build a (user_prompt → assistant_json) pair for the pre-trade decision."""
     tech_block = _parse_technicals(trade.get("technicals_json", "{}"))
 
-    # History block (last 4 previous trades)
+    # History block (last 4 previous trades) — MUST be same-symbol and strictly
+    # before this decision date, else future / other-symbol trades leak into the
+    # training prompt (and survive the later walk-forward re-sort). We filter by
+    # decision_date here rather than trusting the caller's ordering.
+    _sym = trade["symbol"]; _dd = trade["decision_date"]
+    _hist = [pt for pt in prev_trades
+             if pt.get("symbol") == _sym and (pt.get("decision_date") or "") < _dd]
+    _hist.sort(key=lambda pt: (pt.get("decision_date") or "", pt.get("id", 0)))
     hist_lines = []
-    for pt in prev_trades[-4:]:
+    for pt in _hist[-4:]:
         pnl = pt.get("pnl", 0)
         hist_lines.append(
             f"  {pt['decision_date']} | {pt['action']} @ {pt['entry_price']:.1f}"
@@ -117,18 +125,40 @@ def build_pre_trade_example(trade: dict, prev_trades: list[dict]) -> dict | None
         f"Decide. Output JSON only."
     )
 
-    # Reconstruct the assistant's answer from stored fields
+    # Risk:reward for BOTH sides (the old code hardcoded 0.0 for SELL, which the
+    # quality filter then dropped — silently deleting every SELL example).
+    entry = trade["entry_price"]; sl = trade["stop_loss"]; tp = trade["take_profit"]
+    if trade["action"] == "BUY":
+        risk_reward = round((tp - entry) / max(entry - sl, 0.01), 2)
+    elif trade["action"] == "SELL":
+        risk_reward = round((entry - tp) / max(sl - entry, 0.01), 2)
+    else:
+        risk_reward = 0.0
+
+    # Real confidence (stored in the technicals snapshot by the simulator); the
+    # old code hardcoded 0.7, which made min_confidence a no-op.
+    confidence = _tech_field(trade, "confidence", 0.7)
+    try:
+        confidence = round(float(confidence), 3)
+    except Exception:
+        confidence = 0.7
+
+    # features_used: teach the model to cite which signals drove the decision.
+    # Stored by the simulator in the technicals snapshot; default to a sane list.
+    features_used = _tech_field(trade, "features_used", None)
+    if not isinstance(features_used, list) or not features_used:
+        features_used = ["ema_stack", "above_vwap", "nearest_support", "nearest_resistance"]
+
     assistant_json = json.dumps({
         "action":      trade["action"],
         "quantity":    trade["quantity"],
-        "stop_loss":   trade["stop_loss"],
-        "take_profit": trade["take_profit"],
-        "risk_reward": round((trade["take_profit"] - trade["entry_price"]) /
-                             max(trade["entry_price"] - trade["stop_loss"], 0.01), 2)
-                       if trade["action"] == "BUY" else 0.0,
+        "stop_loss":   sl,
+        "take_profit": tp,
+        "risk_reward": risk_reward,
         "reasoning":   trade["pre_trade_reasoning"],
-        "confidence":  0.7,
-        "key_risk":    f"SL at {trade['stop_loss']:.2f} if trend reverses",
+        "confidence":  confidence,
+        "features_used": features_used,
+        "key_risk":    f"SL at {sl:.2f} if trend reverses",
     }, indent=2)
 
     return {
@@ -241,13 +271,26 @@ def _dedup_key(example: dict) -> tuple:
     that round to the same bucket are treated as duplicates (keep one).
     """
     d = _assistant_json(example)
+    action = d.get("action")
+    # Post-trade / lesson rows have no action, SL or TP — the old coarse key
+    # mapped every one of them to the SAME tuple, collapsing them to a single
+    # row. Fall back to a content hash so each distinct lesson survives.
+    if action not in ("BUY", "SELL"):
+        import hashlib
+        try:
+            txt = next(m["content"] for m in example.get("messages", [])
+                       if m.get("role") == "assistant")
+        except StopIteration:
+            txt = json.dumps(d, sort_keys=True)
+        return ("_content", hashlib.sha1(txt.encode("utf-8", "ignore")).hexdigest()[:16])
+
     def b(x, step):
         try:
             return round(float(x) / step) * step
         except Exception:
             return None
     return (
-        d.get("action"),
+        action,
         b(d.get("stop_loss"), 1.0),
         b(d.get("take_profit"), 1.0),
         b(d.get("risk_reward"), 0.25),
@@ -307,6 +350,7 @@ def build_dataset(
     seed: int = 42,
     do_balance: bool | None = None,
     do_dedup: bool | None = None,
+    split_mode: str | None = None,
 ) -> dict[str, int]:
     import os
     if do_balance is None:
@@ -349,10 +393,15 @@ def build_dataset(
         print("   Run more simulation episodes across more symbols/dates.")
 
     # ── Split: 'time' = walk-forward (train=earliest, test=latest) or 'random' ──
-    split_mode = os.environ.get("SPLIT_MODE", "time").strip().lower()
+    split_mode = (split_mode or os.environ.get("SPLIT_MODE", "time")).strip().lower()
     n = len(filtered)
-    n_test = max(1, int(n * test_ratio))
-    n_val  = max(1, int(n * val_ratio))
+    # Guard tiny datasets: never let val+test exceed n-1, so train stays >= 0
+    # (the old max(1,...) could produce a negative train slice for very small n).
+    n_test = max(1, int(n * test_ratio)) if n >= 3 else (1 if n >= 1 else 0)
+    n_val  = max(1, int(n * val_ratio)) if n >= 3 else 0
+    while n_test + n_val >= n and (n_test + n_val) > 0:
+        if n_val > 0: n_val -= 1
+        elif n_test > 0: n_test -= 1
     if split_mode == "time":
         # Chronological: earliest dates train, latest dates are the (future) test.
         filtered.sort(key=lambda e: (e.get("_meta", {}).get("date") or "", e.get("_meta", {}).get("episode", 0)))

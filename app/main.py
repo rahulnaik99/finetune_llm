@@ -16,6 +16,7 @@ from __future__ import annotations
 # Wire sys.path for the bare-name imports used by the heavy domain modules.
 import common  # noqa: F401  (import side-effect: setup_paths)
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -35,17 +36,20 @@ from modules.governance.api import router as governance_router
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Modern replacement for the deprecated @app.on_event("startup").
+    ensure_dirs()
+    yield
+
+
 app = FastAPI(
     title="Trading-Agent LLM Fine-tuning Pipeline",
     description="Modular, resumable pipeline: datagen → splitter → training → "
                 "evaluation, orchestrated by the flywheel.",
     version="2.0.0",
+    lifespan=lifespan,
 )
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    ensure_dirs()
 
 
 # ── cross-stage endpoints ─────────────────────────────────────────────────────

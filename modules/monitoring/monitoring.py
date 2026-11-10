@@ -56,11 +56,21 @@ def run_drift_report(
     Returns a summary dict; also saves an HTML report.
     """
     try:
+        import evidently as _ev
+    except ImportError:
+        raise ImportError("Evidently is not installed. `pip install \"evidently>=0.4,<0.5\"`.")
+    try:
+        # 0.4.x API (pinned). Newer 0.6/0.7 moved these modules, so give a
+        # precise message rather than a misleading "pip install evidently".
         from evidently.report import Report
         from evidently.metric_preset import DataDriftPreset, DataQualityPreset
         from evidently.metrics import ColumnDriftMetric
-    except ImportError:
-        raise ImportError("pip install evidently")
+    except ImportError as exc:
+        raise ImportError(
+            f"Installed Evidently {getattr(_ev, '__version__', '?')} is incompatible "
+            "with this code (expects the 0.4.x Report API). Pin "
+            "`evidently>=0.4,<0.5` or migrate to the new evidently.Report/presets API."
+        ) from exc
 
     ref = load_decisions(reference_path)
     cur = load_decisions(current_path)

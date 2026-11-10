@@ -225,7 +225,7 @@ def _llm_generate(system: str, user: str, temp: float = 0.2) -> str | None:
         try:
             if kind == "mlx":
                 from inference_mlx import generate_mlx
-                return generate_mlx(obj, system, user)
+                return generate_mlx(obj, system, user, temperature=temp)
             else:
                 return obj.generate(system, user)
         except Exception as e:
@@ -278,8 +278,13 @@ def init_db() -> None:
                 capital_before REAL, capital_after REAL,
                 pre_trade_reasoning TEXT, post_trade_analysis TEXT,
                 lesson_learned TEXT, what_went_wrong TEXT,
+                strategy_adjustment TEXT,
                 technicals_json TEXT, created_at TEXT);
         """)
+        # Migrate older DBs that predate the strategy_adjustment column.
+        cols = [r[1] for r in con.execute("PRAGMA table_info(trade_log)")]
+        if "strategy_adjustment" not in cols:
+            con.execute("ALTER TABLE trade_log ADD COLUMN strategy_adjustment TEXT")
     print(f"  DB ready: {DB_PATH}")
 
 
@@ -780,6 +785,20 @@ def pre_trade_decision(symbol, date, tech, fund, capital, history) -> dict:
                     "reasoning": f"Rule: bullish EMA stack, above VWAP, support {ns['mid']:.1f}",
                     "key_risk": "EMA reversal",
                     "features_used": ["ema_stack", "above_vwap", "nearest_support"]}
+    # Symmetric SELL rule — without this the fallback can only BUY/HOLD, so the
+    # model never sees a single short setup to learn from.
+    if tech["ema_stack"].startswith("bearish") and not tech["above_vwap"] and nr:
+        sl = round(nr["high"] * 1.002, 2)
+        tp = round(ns["mid"] if ns else cur * 0.98, 2)
+        rp = max(sl - cur, 0.01)
+        qty = min(max(1, int(max_risk / rp)), max(1, int(capital // cur)))
+        rr = round((cur - tp) / rp, 2)
+        if rr >= 1.5:
+            return {"action": "SELL", "quantity": qty, "stop_loss": sl, "take_profit": tp,
+                    "risk_reward": rr, "confidence": 0.55,
+                    "reasoning": f"Rule: bearish EMA stack, below VWAP, resistance {nr['mid']:.1f}",
+                    "key_risk": "EMA reversal",
+                    "features_used": ["ema_stack", "above_vwap", "nearest_resistance"]}
     return {"action": "HOLD", "quantity": 0, "stop_loss": 0, "take_profit": 0,
             "risk_reward": 0, "confidence": 0.4,
             "reasoning": "Rule: no clear setup (EMA stack/VWAP not aligned).", "key_risk": "—",
@@ -823,6 +842,15 @@ def check_sl_tp(action, entry, sl, tp, fwd_df, max_hold=MAX_HOLD_DAYS):
             if lo <= tp: return "TP_HIT", round(tp, 2), ds, i + 1
     last = fwd_df.head(max_hold).iloc[-1]
     return "TIME_EXIT", round(float(last["close"]), 2), str(fwd_df.head(max_hold).index[-1].date()), max_hold
+
+
+def _safe_num(x, default=0.0):
+    """Coerce a model field to float; 'N/A'/None/'' etc. -> default (no crash)."""
+    try:
+        v = float(x)
+        return v if v == v else default   # reject NaN
+    except (TypeError, ValueError):
+        return default
 
 
 def compute_pnl(action, entry, exit_p, qty):
@@ -929,15 +957,22 @@ class TradingAgent:
 
         dec = pre_trade_decision(self.symbol, date, tech, fund, self.capital, self.history)
         action = dec.get("action", "HOLD")
-        qty = int(dec.get("quantity", 0))
-        sl  = float(dec.get("stop_loss", 0))
-        tp  = float(dec.get("take_profit", 0))
+        if action not in ("BUY", "SELL", "HOLD"):
+            action = "HOLD"
+        qty = int(_safe_num(dec.get("quantity", 0), 0))
+        sl  = _safe_num(dec.get("stop_loss", 0), 0.0)     # 'N/A'/None no longer crash
+        tp  = _safe_num(dec.get("take_profit", 0), 0.0)
         rsn = dec.get("reasoning", "—")
+        confidence = _safe_num(dec.get("confidence", 0.5), 0.5)
 
         # Volatility-based position sizing (India VIX regime).
         vs = vix_sizing(vc)
         if action in ("BUY", "SELL") and qty > 0:
             qty = max(1, int(round(qty * vs["qty_factor"])))
+            # Re-cap to what the capital can actually buy AFTER VIX scaling, else
+            # the multiplier can push size above the affordable limit.
+            affordable = max(1, int(self.capital // max(entry_p, 0.01)))
+            qty = min(qty, affordable)
             if vs["dist_mult"] != 1.0 and sl and tp:
                 if action == "BUY":
                     sl = round(entry_p - (entry_p - sl) * vs["dist_mult"], 2)
@@ -965,6 +1000,7 @@ class TradingAgent:
             "pnl": pnl, "capital_before": cap_before, "capital_after": self.capital,
             "pre_trade_reasoning": rsn, "post_trade_analysis": "—",
             "lesson_learned": "—", "what_went_wrong": "—",
+            "strategy_adjustment": "—",
         }
         mark = "PROFIT" if pnl > 0 else "LOSS" if pnl < 0 else "FLAT"
         print(f"     [{mark}] {exit_reason} @ {exit_p:.2f} | P&L {pnl:+.0f} | Cap {self.capital:,.0f}")
@@ -974,25 +1010,40 @@ class TradingAgent:
             trade["post_trade_analysis"] = analysis.get("exit_reason_analysis", "—")
             trade["lesson_learned"] = analysis.get("lesson_learned", "—")
             trade["what_went_wrong"] = analysis.get("what_went_wrong", "—")
+            trade["strategy_adjustment"] = analysis.get("strategy_adjustment", "—")
 
         tech_snap = {k: v for k, v in tech.items() if k != "_df"}
         tech_snap["gross_pnl"] = gross_pnl
         tech_snap["costs"] = costs
         tech_snap["vix_sizing"] = vs
+        tech_snap["confidence"] = confidence
+        tech_snap["features_used"] = dec.get("features_used") or []
         with sqlite3.connect(DB_PATH) as con:
-            con.execute("""INSERT INTO trade_log (
+            # DB-level dedup: never store two rows for the same (symbol, date).
+            # Prevents re-runs / --no-resume / state resets from piling up
+            # duplicate episodes (which also corrupted history + datasheet counts).
+            dup = con.execute(
+                "SELECT 1 FROM trade_log WHERE symbol=? AND decision_date=? LIMIT 1",
+                (trade["symbol"], trade["decision_date"])).fetchone()
+            if dup:
+                print(f"     (skip DB insert — {trade['symbol']} {trade['decision_date']} already logged)")
+            else:
+              con.execute("""INSERT INTO trade_log (
                 episode,symbol,decision_date,action,entry_price,quantity,stop_loss,
                 take_profit,exit_price,exit_date,exit_reason,pnl,capital_before,
                 capital_after,pre_trade_reasoning,post_trade_analysis,lesson_learned,
-                what_went_wrong,technicals_json,created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                what_went_wrong,strategy_adjustment,technicals_json,created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
                 trade["episode"], trade["symbol"], trade["decision_date"], trade["action"],
                 trade["entry_price"], trade["quantity"], trade["stop_loss"], trade["take_profit"],
                 trade["exit_price"], trade["exit_date"], trade["exit_reason"], trade["pnl"],
                 trade["capital_before"], trade["capital_after"], trade["pre_trade_reasoning"],
                 trade["post_trade_analysis"], trade["lesson_learned"], trade["what_went_wrong"],
+                trade["strategy_adjustment"],
                 json.dumps(tech_snap), datetime.now().isoformat()))
 
         self.history.append(trade)
-        self.date = next_trading_day(date, 1)
+        # Advance past the EXIT, not just one day past the decision — otherwise
+        # the next episode's context/capital includes a trade that hasn't closed.
+        self.date = next_trading_day(exit_date or date, 1)
         return trade

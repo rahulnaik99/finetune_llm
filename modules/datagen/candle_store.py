@@ -20,6 +20,15 @@ Usage:
     df = store.load_candles("CANBK", "1m", "2024-01-01", "2024-10-10")
     features = store.compute_features(df)
 """
+"""REFERENCE IMPLEMENTATION — NOT wired into the live pipeline.
+
+This Polars+DuckDB Parquet candle store is a production-grade data layer for
+1-minute, multi-year data (SQL-on-Parquet, no full-file scans). The simulation
+currently reads candles via pandas/CSV/yfinance (see simulation.get_candles).
+To adopt it, route get_candles()/compute_zones() through CandleStore. Kept as a
+reference so the capability is documented without being a dead dependency.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta

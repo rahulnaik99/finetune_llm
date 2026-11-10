@@ -58,9 +58,14 @@ if HAS_PREFECT:
                               base_model: str = "mlx-community/NVIDIA-Nemotron-3.5-Bolt-E4B-OptiQ-4bit") -> dict:
         """The flywheel as a Prefect flow: datagen → split → train → eval per round."""
         from modules.training.service import find_adapter
-        current_adapter = None
-        results = []
-        for rnd in range(1, rounds + 1):
+        from common.state import StateStore
+        # Honour round-level resume (parity with the native orchestrator): skip
+        # rounds already completed, start from the first unfinished one.
+        ck = StateStore("orchestrator").load().checkpoint
+        last_done = int(ck.get("last_round_done", 0))
+        current_adapter = ck.get("current_adapter")
+        results = list(ck.get("rounds", []))
+        for rnd in range(last_done + 1, rounds + 1):
             backend = "adapter" if current_adapter else "fallback"
             datagen_task(symbol, start_date, episodes * rnd, backend, current_adapter)
             split = split_task(rnd)
@@ -70,6 +75,8 @@ if HAS_PREFECT:
             current_adapter = tr.get("adapter") or current_adapter or find_adapter(rnd)
             ev = eval_task(rnd, current_adapter)
             results.append({"round": rnd, "trained": True, "trading": ev.get("trading")})
+            StateStore("orchestrator").checkpoint(last_round_done=rnd, rounds=results,
+                                                  current_adapter=current_adapter)
         return {"rounds": results, "final_adapter": current_adapter}
 
 

@@ -1,0 +1,10 @@
+# NVIDIA GPU training stack (QLoRA). Install on a CUDA box:
+#   pip install -r requirements.txt -r requirements-gpu.txt
+# (On Apple Silicon use `pip install mlx-lm` instead — train.py auto-detects.)
+torch>=2.2
+transformers>=4.40
+peft>=0.10
+trl>=0.8
+bitsandbytes>=0.43
+accelerate>=0.29
+datasets>=2.18

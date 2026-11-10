@@ -7,8 +7,9 @@ A guided tour of the whole codebase. For each module you get:
    it is, and a plain-English explanation.
 3. **Real-life analogies** so the *why* sticks.
 
-Line numbers match the shipped source. They can drift by a line or two if you
-edit a file, but the function names are the stable anchors. Open the file beside
+Line numbers are accurate to within a few lines of the shipped source and will
+drift as the file evolves — the **function/class names are the stable anchors**.
+When in doubt, grep the name. Open the file beside
 this doc and read top-to-bottom.
 
 > Mental model for the whole system (keep this picture in your head):
@@ -561,3 +562,49 @@ You click **Generate** in the UI →
 
 Read any one vertical slice (`api.py` → `service.py` → the heavy module) and
 you've understood the whole system; the other stages are the same shape.
+
+
+---
+
+# Appendix — Audit deltas (Days 5–7)
+
+New/changed functions from the three review passes (names are the stable
+anchors; line numbers approximate):
+
+**Data correctness (splitter — `modules/splitter/data_pipeline.py`)**
+- `build_pre_trade_example` (L98) — SELL risk:reward now computed; history is
+  **same-symbol + strictly-before the decision date** (no look-ahead / no
+  cross-symbol leak); emits `features_used`; real confidence.
+- `_dedup_key` (L268) — content-hash key for post-trade rows (no more collapse).
+- `build_dataset` (L343) — exact content-hash de-dup; tiny-dataset slice guard;
+  `split_mode` passed as an arg (no `os.environ` mutation).
+
+**Datagen (`modules/datagen/service.py` + `simulation.py`)**
+- `_safe_num` (sim L847) — safe numeric coercion (`"N/A"` can't crash an episode).
+- `trade_costs` (sim L862) / `vix_sizing` (sim L895) — fees/taxes + VIX sizing.
+- DB-level dedup guard in `run_episode` ((symbol, decision_date)).
+- `history_from_db` (L51) — re-hydrates agent history on resume.
+- `_window_ranges` (L379) + `run_datagen(end_date=…)` (L86) +
+  `run_datagen_windows` (L434) — **non-overlapping** windowed parallelism.
+- `_additive_insert` (L269) / `_merge_shard_into_main` (L284) — non-destructive,
+  signature-dedup, param-bound ATTACH shard merge.
+
+**Evaluation (`modules/evaluation`)**
+- `trading_metrics` — Sortino, t-stat/significance; `multi_fold_metrics` (walk-
+  forward robustness); `profit_factor` JSON-safe (`None`, not `inf`); reasoning
+  null-safe; model-quality splits pre/post-trade rows.
+- `_test_fingerprint` (service L30) — eval cache keyed to the test set; `force` honoured.
+
+**Shared / tooling**
+- `common/params.py:load_params` (L17) — `params.yaml` is the single source of
+  truth (training service resolves hyper-params from it; sentinel `None` args).
+- `common/hashing.py` — trained-hash registry stored under `output/` (not
+  `STATE_DIR`), so it is not shown as a bogus UI "stage".
+- `common/validation.py` — `volume >= 0` added to the data-quality gate.
+- `modules/training/service.py:_mlflow` (L30) + `run_training` (L66) — logs the
+  loss curve; `modules/evaluation/service.py:run_eval` (L56) attaches eval
+  metrics to the SAME MLflow run (no-op without MLflow).
+- `modules/orchestrator/flows.py` — Prefect flow honours round-level resume.
+
+**Reference-only (NOT wired into the live pipeline):** `candle_store.py`,
+`scripts/fetch_candles.py` (Polars/DuckDB Parquet store) — see their banners.

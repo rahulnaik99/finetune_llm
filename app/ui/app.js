@@ -38,7 +38,7 @@ function stageCard(name, st) {
     <div class="name">${name}</div>
     <span class="badge ${status}">${status}</span>
     <div class="progress" style="margin-top:10px"><div class="bar" style="width:${pct}%"></div></div>
-    <div class="msg">${fmt(st && st.message)}</div>
+    <div class="msg">${esc(st && st.message)}</div>
   </div>`;
 }
 async function refreshOverview() {
@@ -65,7 +65,7 @@ function renderStatus(el, st) {
     ["Message", fmt(st.message)],
     st.error ? ["Error", st.error] : null,
   ].filter(Boolean)
-   .map(([k, v]) => `<div><b>${k}</b>${fmt(v)}</div>`).join("");
+   .map(([k, v]) => `<div><b>${esc(k)}</b>${esc(v)}</div>`).join("");
 }
 
 /* ── data generation ──────────────────────────────────────────────────── */
@@ -126,7 +126,13 @@ $("ds-load").onclick = async () => {
     }).join("") || '<p class="hint">Empty split.</p>';
   } catch (e) { alert("Dataset: " + e.message); }
 };
-function escapeHtml(s) { return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+function escapeHtml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"'`]/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;", "`": "&#96;",
+  }[c]));
+}
+// esc() = escaped formatter for any value shown in the DOM.
+function esc(v) { return (v === null || v === undefined || v === "") ? "—" : escapeHtml(v); }
 
 /* ── training ─────────────────────────────────────────────────────────── */
 $("tr-run").onclick = async () => {
@@ -179,7 +185,7 @@ async function refreshEvaluation() {
       ["Max drawdown", tm.max_drawdown], ["Trades", tm.n],
     ];
     $("ev-metrics").innerHTML = cards.map(([l, v]) =>
-      `<div class="metric"><div class="label">${l}</div><div class="value">${fmt(v)}</div></div>`).join("");
+      `<div class="metric"><div class="label">${esc(l)}</div><div class="value">${esc(v)}</div></div>`).join("");
   } catch (e) {}
 }
 

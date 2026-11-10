@@ -7,6 +7,9 @@
 # retries/scheduling; DVC is the *reproducibility/versioning* layer. They are
 # complementary and both call the same `run.py` stage commands.
 
+# NOTE: this is a SINGLE-ROUND, single-symbol TEMPLATE (round_01, ${symbol}).
+# The flywheel runs multi-round/multi-symbol; extend/foreach these stages
+# (or drive via Prefect) for the full DAG.
 stages:
   datagen:
     cmd: python run.py datagen --symbol ${symbol} --start_date ${start_date} --episodes ${episodes_per_round}

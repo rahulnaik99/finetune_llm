@@ -14,6 +14,7 @@ Usage:
 """
 from __future__ import annotations
 import os
+import re
 from pathlib import Path
 
 
@@ -36,7 +37,9 @@ def load_env(path: str = ".env") -> None:
             continue
         key, _, val = line.partition("=")
         key = key.strip()
-        val = val.split("#", 1)[0].strip().strip('"').strip("'")  # strip inline comments + quotes
+        # Only strip a '#' that begins an inline comment (preceded by whitespace),
+        # so values legitimately containing '#' (tokens, URL fragments) survive.
+        val = re.split(r"\s#", val, 1)[0].strip().strip('"').strip("'")
         if key:
             os.environ.setdefault(key, val)
 
