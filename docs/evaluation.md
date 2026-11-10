@@ -55,3 +55,20 @@ metrics **across rounds**.
 python run.py eval --round 1
 python run.py eval --round 1 --quality     # also run model-quality (needs MLX model)
 ```
+
+## Advanced / industry-grade metrics (added)
+
+- **Sortino ratio** — like Sharpe but penalises only *downside* volatility (the
+  honest measure for asymmetric P&L).
+- **t-stat + `significant_95`** — is the positive expectancy statistically real
+  or luck? `|t| >= 2` ≈ 95% confidence.
+- **Multi-fold walk-forward** (`multi_fold_metrics`) — splits the test stream
+  into K chronological folds and reports per-fold metrics + whether the edge is
+  **consistent** across every period (the standard overfitting guard). Surfaced
+  in the eval output as `walk_forward`.
+
+> Note on ROUGE/BLEU: these are *text-overlap* metrics for summarisation/
+> translation and are **not** appropriate for structured trading decisions. Use
+> JSON/schema/action-match for format quality and the trading metrics above for
+> outcome. A free-text `reasoning` score (BERTScore / LLM-as-judge) can be added
+> as an optional extra, but ROUGE is intentionally omitted.

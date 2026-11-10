@@ -31,6 +31,7 @@ from modules.training.api import router as training_router
 from modules.evaluation.api import router as evaluation_router
 from modules.orchestrator.api import router as orchestrator_router
 from modules.monitoring.api import router as monitoring_router
+from modules.governance.api import router as governance_router
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
 
@@ -61,7 +62,8 @@ def overview() -> dict:
 
 # ── stage routers (each under /api) ───────────────────────────────────────────
 for r in (datagen_router, splitter_router, training_router,
-          evaluation_router, orchestrator_router, monitoring_router):
+          evaluation_router, orchestrator_router, monitoring_router,
+          governance_router):
     app.include_router(r, prefix="/api")
 
 

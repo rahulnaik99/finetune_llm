@@ -1,0 +1,58 @@
+# DVC pipeline — reproducible, versioned ML DAG.
+#   Industry-standard way to version data+models and re-run only what changed.
+#   Run:   dvc repro            (runs stages whose deps changed)
+#          dvc dag              (show the pipeline graph)
+#          dvc metrics show     (compare eval metrics across commits)
+# Prefect (modules/orchestrator/flows.py) is the *runtime* orchestrator with
+# retries/scheduling; DVC is the *reproducibility/versioning* layer. They are
+# complementary and both call the same `run.py` stage commands.
+
+stages:
+  datagen:
+    cmd: python run.py datagen --symbol ${symbol} --start_date ${start_date} --episodes ${episodes_per_round}
+    deps:
+      - run.py
+      - modules/datagen
+      - data/prices
+      - data/fundamentals
+    outs:
+      - trading_agent.db:
+          cache: true
+          persist: true          # accumulate across runs (resume-friendly)
+
+  split:
+    cmd: python run.py split --round 1
+    deps:
+      - trading_agent.db
+      - modules/splitter
+    outs:
+      - data/rounds/round_01
+
+  train:
+    cmd: python run.py train --round 1 --iters ${mlx_iters}
+    deps:
+      - data/rounds/round_01/trading_train.jsonl
+      - modules/training
+    outs:
+      - output/adapters/round_01
+
+  evaluate:
+    cmd: python run.py eval --round 1
+    deps:
+      - data/rounds/round_01/trading_test.jsonl
+      - output/adapters/round_01
+      - modules/evaluation
+    metrics:
+      - output/metrics/eval_round_01.json:
+          cache: false
+
+  governance:
+    cmd: python run.py card
+    deps:
+      - output/metrics/eval_round_01.json
+      - modules/governance
+    outs:
+      - docs/generated/MODEL_CARD.md:
+          cache: false
+      - docs/generated/DATASHEET.md:
+          cache: false

@@ -1,0 +1,9 @@
+# Optional "industry framework" extras. The pipeline runs without these
+# (they're lazily imported / fall back gracefully), but installing them turns on
+# the standard tooling:
+prefect>=2.14        # workflow orchestration engine (python run.py flywheel --engine prefect)
+dvc>=3.0             # reproducible, versioned pipeline DAG (dvc repro / dvc dag)
+pandera>=0.18        # declarative data-quality schemas (python run.py validate)
+evidently>=0.4       # data/feature drift monitoring (modules/monitoring)
+mlflow>=2.9          # experiment tracking + model registry
+bert-score>=0.3      # optional semantic score for the free-text 'reasoning' field

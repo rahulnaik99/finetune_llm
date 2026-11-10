@@ -20,6 +20,7 @@ symbols:
   - INDUSINDBK
   - FEDERALBNK
 
+symbol: CANBK               # single-symbol default (DVC pipeline)
 start_date: "2023-01-10"    # start of simulation history
 end_date:   "2024-10-10"    # strict cutoff (no data beyond this)
 rounds: 5                    # flywheel rounds

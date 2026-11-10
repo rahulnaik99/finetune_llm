@@ -102,6 +102,17 @@ def trading_metrics(pnls: list[float]) -> dict:
     std = math.sqrt(var)
     sharpe = round(mean / std, 2) if std > 0 else 0.0   # per-trade Sharpe
 
+    # Sortino: like Sharpe but only penalises DOWNSIDE volatility (industry
+    # standard for asymmetric return streams — losses hurt, upside doesn't).
+    downside = [p for p in pnls if p < 0]
+    dvar = sum(p * p for p in downside) / n if downside else 0.0
+    dstd = math.sqrt(dvar)
+    sortino = round(mean / dstd, 2) if dstd > 0 else 0.0
+
+    # Statistical significance of the edge: t-stat of mean P&L > 0.
+    # |t| >= ~2 ≈ 95% confidence the positive expectancy is not luck.
+    t_stat = round(mean / (std / math.sqrt(n)), 2) if std > 0 else 0.0
+
     # max drawdown on the cumulative P&L curve
     cum, peak, mdd = 0.0, 0.0, 0.0
     for p in pnls:
@@ -117,8 +128,40 @@ def trading_metrics(pnls: list[float]) -> dict:
         "expectancy": round(mean, 2),                      # avg P&L per trade
         "profit_factor": round(gross_win / gross_loss, 2) if gross_loss > 0 else float("inf"),
         "sharpe_per_trade": sharpe,
+        "sortino_per_trade": sortino,
+        "t_stat": t_stat,                                  # edge significance
+        "significant_95": abs(t_stat) >= 2.0,
         "total_pnl": round(sum(pnls), 2),
         "max_drawdown": round(mdd, 2),
+    }
+
+
+def multi_fold_metrics(pnls: list[float], k: int = 3) -> dict:
+    """Walk-forward robustness: split the P&L stream into K chronological folds
+    and report per-fold metrics + the stability (mean/std) of the edge across
+    folds. A strategy that only works in one period shows high variance here —
+    the standard guard against overfitting to a single stretch of history.
+    """
+    pnls = [float(p) for p in pnls if p is not None]
+    n = len(pnls)
+    if n < k or k < 2:
+        return {"folds": k, "note": "not enough trades for multi-fold", "per_fold": []}
+    size = n // k
+    folds = []
+    for i in range(k):
+        lo = i * size
+        hi = n if i == k - 1 else (i + 1) * size
+        folds.append(trading_metrics(pnls[lo:hi]))
+    exps = [f.get("expectancy", 0.0) for f in folds]
+    mean_exp = sum(exps) / k
+    var_exp = sum((e - mean_exp) ** 2 for e in exps) / k
+    return {
+        "folds": k,
+        "per_fold": folds,
+        "expectancy_mean": round(mean_exp, 2),
+        "expectancy_std": round(math.sqrt(var_exp), 2),
+        "profitable_folds": sum(1 for e in exps if e > 0),
+        "consistent": all(e > 0 for e in exps),   # edge holds in every period?
     }
 
 

@@ -1,7 +1,20 @@
 # TIMELINE — change log
 
-Reverse-chronological record of what changed and why. Dates are relative
-("Day N") since this is an iterative hand-off.
+Reverse-chronological record of what changed and why.
+
+## Day 4 — Industry-standard alignment
+
+| Area | What shipped |
+|---|---|
+| Evaluation | Added **Sortino**, **t-stat / 95% significance**, and **multi-fold walk-forward** robustness; documented why **ROUGE is not used** for structured trading output. |
+| Orchestration | Added **Prefect** flows (`--engine prefect`) as a standard workflow engine with retries/caching; native loop kept as fallback. FastAPI reduced to its correct API/UI role. |
+| Reproducibility | Re-added a **DVC** pipeline (`dvc.yaml` + `params.yaml`) for versioned, change-aware stage runs. |
+| Governance | Auto-generated **Model Card** + **Dataset Datasheet** (`run.py card`, `/api/governance/*`). |
+| Data validation | **pandera-optional** CSV quality gate (`run.py validate`) with a dependency-free fallback. |
+| Deps | `requirements-optional.txt` lists the framework extras (prefect, dvc, pandera, evidently, mlflow, bert-score) — all optional/lazy. |
+
+Tests: **58 passing** (added advanced-metrics, governance+validation, and
+orchestration-flows suites).
 
 ---
 

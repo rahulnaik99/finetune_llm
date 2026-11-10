@@ -17,8 +17,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 
-import common  # noqa: F401 — path bootstrap
+# Make `python run.py ...` work from anywhere / regardless of PYTHONSAFEPATH:
+# ensure the project root (this file's dir) is importable before touching common.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import common  # noqa: F401,E402 — path bootstrap
 from common.config import load_env
 
 
@@ -54,10 +60,17 @@ def main() -> None:
     ev = sub.add_parser("eval"); ev.add_argument("--round", type=int, default=1)
     ev.add_argument("--quality", action="store_true")
 
+    cd = sub.add_parser("card"); cd.add_argument("--round", type=int, default=None)
+    vd = sub.add_parser("validate")
+    vd.add_argument("--prices", default="data/prices/CANBK.csv")
+    vd.add_argument("--vix", default="data/prices/INDIAVIX.csv")
+
     fw = sub.add_parser("flywheel")
     fw.add_argument("--symbol", default="CANBK"); fw.add_argument("--start_date", default="2024-01-10")
     fw.add_argument("--rounds", type=int, default=5); fw.add_argument("--episodes", type=int, default=50)
     fw.add_argument("--no-resume", action="store_true")
+    fw.add_argument("--engine", choices=["native", "prefect"], default="native",
+                    help="native in-process loop, or the standard Prefect workflow engine")
 
     sub.add_parser("status")
     args = p.parse_args()
@@ -94,10 +107,22 @@ def main() -> None:
         from modules.evaluation.service import run_eval
         _print(run_eval(round_num=args.round, model_quality=args.quality))
     elif args.cmd == "flywheel":
-        from modules.orchestrator.service import run_flywheel
-        _print(run_flywheel(symbol=args.symbol, start_date=args.start_date,
-                           rounds=args.rounds, episodes=args.episodes,
-                           resume=not args.no_resume))
+        if args.engine == "prefect":
+            from modules.orchestrator.flows import run_prefect_flywheel
+            _print(run_prefect_flywheel(symbol=args.symbol, start_date=args.start_date,
+                                        rounds=args.rounds, episodes=args.episodes,
+                                        resume=not args.no_resume))
+        else:
+            from modules.orchestrator.service import run_flywheel
+            _print(run_flywheel(symbol=args.symbol, start_date=args.start_date,
+                               rounds=args.rounds, episodes=args.episodes,
+                               resume=not args.no_resume))
+    elif args.cmd == "card":
+        from modules.governance.service import generate_all
+        _print(generate_all(args.round))
+    elif args.cmd == "validate":
+        from common.validation import validate_inputs
+        _print(validate_inputs(args.prices, args.vix))
     elif args.cmd == "status":
         from common.state import all_states
         _print(all_states())

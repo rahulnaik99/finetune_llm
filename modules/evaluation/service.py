@@ -51,10 +51,12 @@ def run_eval(
         return {"round": round_num, "error": "no test split"}
 
     from evaluate import (trading_metrics, pnls_from_test_meta,
-                          evaluate_model_quality)
+                          evaluate_model_quality, multi_fold_metrics)
 
     out: dict = {"round": round_num}
-    out["trading"] = trading_metrics(pnls_from_test_meta(str(test_path)))
+    pnls = pnls_from_test_meta(str(test_path))
+    out["trading"] = trading_metrics(pnls)
+    out["walk_forward"] = multi_fold_metrics(pnls, k=3)   # robustness across periods
 
     if model_quality and adapter_path:
         cand = [Path(adapter_path), Path(adapter_path).parent / "fused_model"]
@@ -74,6 +76,8 @@ def run_eval(
                "win_rate": tm.get("win_rate"), "expectancy": tm.get("expectancy"),
                "profit_factor": tm.get("profit_factor"),
                "sharpe": tm.get("sharpe_per_trade"),
+               "sortino": tm.get("sortino_per_trade"),
+               "t_stat": tm.get("t_stat"),
                "max_drawdown": tm.get("max_drawdown")})
     store.update(current=1)
     store.finish(message=f"round_{round_num:02d}: win {tm.get('win_rate','?')}% "

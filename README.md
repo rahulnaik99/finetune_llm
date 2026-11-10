@@ -48,7 +48,7 @@ data/, output/         # datasets, adapters, state/, metrics/
 trading_agent.db       # raw generated data (SQLite)
 ```
 
-Narrative overview: [STORY.md](STORY.md) · change log: [TIMELINE.md](TIMELINE.md)
+Narrative overview: [STORY.md](STORY.md) · line-by-line code tour: [docs/CODEWALK.md](docs/CODEWALK.md) · change log: [TIMELINE.md](TIMELINE.md)
 
 Full module docs: [datagen](docs/trainingdata.md) ·
 [splitter](docs/splitter.md) · [training](docs/training.md) ·
