@@ -10,7 +10,8 @@ Per-module deep-dives live alongside this file:
 [`training.md`](training.md) ·
 [`evaluation.md`](evaluation.md) ·
 [`orchestrator.md`](orchestrator.md) ·
-[`monitoring.md`](monitoring.md) · [`CODEWALK.md`](CODEWALK.md) ·
+[`monitoring.md`](monitoring.md) · [`governance.md`](governance.md) ·
+[`orchestration.md`](orchestration.md) · [`CODEWALK.md`](CODEWALK.md) ·
 [`resume.md`](resume.md) · [`api.md`](api.md)
 
 ---

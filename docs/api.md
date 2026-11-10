@@ -25,12 +25,19 @@ that stage is already running; a `422` for invalid input.
 
 | Stage | Run | State | Extra |
 |---|---|---|---|
-| datagen | `POST /api/datagen/run` | `GET /api/datagen/state` | `GET /api/datagen/summary`, `GET /api/datagen/trades` |
+| datagen | `POST /api/datagen/run` | `GET /api/datagen/state` | `POST /api/datagen/run_parallel` (many symbols), `POST /api/datagen/run_windows` (one symbol, parallel non-overlapping date windows), `GET /api/datagen/summary`, `GET /api/datagen/trades` |
 | splitter | `POST /api/splitter/run` | `GET /api/splitter/state` | `GET /api/splitter/rounds`, `GET /api/splitter/dataset` |
-| training | `POST /api/training/run` | `GET /api/training/state` | `GET /api/training/adapter` |
+| training | `POST /api/training/run` | `GET /api/training/state` | `GET /api/training/adapter`, `GET /api/training/coverage` (new vs already-trained rows) |
 | evaluation | `POST /api/evaluation/run` | `GET /api/evaluation/state` | `GET /api/evaluation/metrics` |
 | orchestrator | `POST /api/orchestrator/run` | `GET /api/orchestrator/state` | — |
+| governance | `POST /api/governance/generate` | — | `GET /api/governance/model_card`, `GET /api/governance/datasheet` |
 | monitoring | `POST /api/monitoring/drift` | `GET /api/monitoring/state` | — |
+
+Notes: `POST /api/datagen/run_parallel` takes `{"symbols":[...], "episodes":N}`;
+`POST /api/datagen/run_windows` takes `{"symbol":..., "episodes":N, "workers":W}`
+and partitions the calendar into W non-overlapping windows. `POST
+/api/evaluation/run` accepts `"force": true` to bypass the cache. `train`'s
+hyper-parameters default to `null` and are resolved from `params.yaml`.
 
 ## Example requests
 
@@ -48,6 +55,23 @@ curl -X POST localhost:8000/api/splitter/run \
 curl -X POST localhost:8000/api/orchestrator/run \
   -H 'content-type: application/json' \
   -d '{"symbol":"CANBK","rounds":5,"episodes":50,"resume":true}'
+
+# parallel multi-symbol generation (one process per symbol)
+curl -X POST localhost:8000/api/datagen/run_parallel \
+  -H 'content-type: application/json' \
+  -d '{"symbols":["CANBK","SBIN","HDFCBANK"],"episodes":80}'
+
+# parallel single-symbol generation (non-overlapping date windows)
+curl -X POST localhost:8000/api/datagen/run_windows \
+  -H 'content-type: application/json' \
+  -d '{"symbol":"CANBK","episodes":200,"workers":4}'
+
+# how many of round 1's rows are new vs already trained
+curl localhost:8000/api/training/coverage?round_num=1
+
+# (re)generate the Model Card + Datasheet, then fetch them
+curl -X POST localhost:8000/api/governance/generate
+curl localhost:8000/api/governance/model_card
 
 # poll everything
 curl localhost:8000/api/overview

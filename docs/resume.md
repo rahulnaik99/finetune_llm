@@ -23,11 +23,11 @@ which is what makes resuming cheap.
 
 | Stage | Persisted state | What a resume skips |
 |---|---|---|
-| **datagen** | `episodes_done`, `date`, `capital` (per episode) | Re-runs only the missing episodes; done target → nothing |
+| **datagen** | `episodes_done`, `date`, `capital` (per episode) | Re-runs only the missing episodes; the checkpoint is **reconciled against the real DB** (and reset if the symbol/date changed) so a stale state can't skip work |
 | **splitter** | DB+params `fingerprint`, `counts` | Reuses the existing split if the DB is unchanged |
-| **training** | adapter path per round | Skips a round whose adapter already exists |
-| **evaluation** | cached `eval_round_NN.json` | Re-reads the cache |
-| **orchestrator** | `last_round_done`, `current_adapter` | Jumps to the first unfinished round |
+| **training** | adapter path per round | Skips a round whose adapter already exists; a non-zero exit is treated as failure (no half-written adapter) |
+| **evaluation** | cached `eval_round_NN.json` + **test-set fingerprint** | Reuses the cache only if the test set is unchanged (`force` bypasses) |
+| **orchestrator** | `last_round_done`, `current_adapter` | Jumps to the first unfinished round; a **failed round is retried** on the next resume, not skipped |
 
 ## Example: crash & resume
 

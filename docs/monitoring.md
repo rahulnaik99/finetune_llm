@@ -38,3 +38,14 @@ curl -X POST localhost:8000/api/monitoring/drift \
   -d '{"reference_path":"data/rounds/round_01/trading_train.jsonl",
        "current_path":"data/rounds/round_05/trading_train.jsonl"}'
 ```
+
+
+## Hardening notes
+
+- **Path allow-listing** — `run_monitoring` rejects `reference_path`/`current_path`
+  outside the project directory (no arbitrary local-file reads via the API).
+- **Evidently pinned `>=0.4,<0.5`** — the code targets the 0.4.x `Report` API;
+  on a newer Evidently the import raises a *precise* message ("installed version
+  is incompatible — pin 0.4.x or migrate") instead of a misleading
+  "pip install evidently".
+- `log_drift_to_mlflow()` records drift summaries to MLflow when configured.

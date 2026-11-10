@@ -5,18 +5,23 @@ split** JSONL ready for supervised fine-tuning.
 
 ## What it does (pipeline inside `data_pipeline.build_dataset`)
 
-1. **Load** non-HOLD trades with reasoning + lessons from `trade_log`.
+1. **Load** non-HOLD trades (ordered by **decision date**, not insertion time) from `trade_log`.
 2. **Build two examples per trade**
-   - *pre-trade*: market context → decision JSON (action, SL, TP, R:R, reasoning…)
-   - *post-trade*: trade outcome → lesson JSON (what went right/wrong, adjustment)
+   - *pre-trade*: market context → decision JSON (action, SL, TP, R:R, reasoning,
+     `features_used`, confidence). The "last-4-trades" history in the prompt is
+     **same-symbol and strictly before the decision date** — no look-ahead and no
+     cross-symbol leakage. Risk:reward is computed for **both** BUY and SELL.
+   - *post-trade*: trade outcome → lesson JSON (what went right/wrong, adjustment).
    Both in HuggingFace **chat format** (`messages: [system, user, assistant]`).
 3. **Quality filter** — drop malformed JSON, HOLDs, low-confidence, poor R:R, and
    (optionally) trades without fresh fundamentals.
-4. **De-dup** — collapse near-identical setups by a coarse decision signature.
-5. **Balance** — cap BUY vs SELL so one side cannot dominate (prevents the
-   "always-HOLD / loss→0" memorisation collapse).
-6. **Split** — `SPLIT_MODE=time` gives a **walk-forward** split (earliest dates
-   train, latest dates test = genuine future), or `random`.
+4. **De-dup** — exact content-hash de-dup (unique rows) **plus** a coarse
+   decision signature; lesson/post-trade rows use a content hash so distinct
+   lessons are not collapsed into one.
+5. **Balance** — cap BUY vs SELL so one side cannot dominate.
+6. **Split** — `split_mode=time` (passed as an arg, not via a global env var)
+   gives a **walk-forward** split (earliest dates train, latest test), or
+   `random`; tiny datasets are slice-guarded so `train` is never negative.
 7. **Write** `trading_{train,val,test}.jsonl` **plus a `_meta` sidecar** per split.
 
 ## Why the `_meta` sidecar matters (a bug we fixed)

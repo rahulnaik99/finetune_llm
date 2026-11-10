@@ -72,3 +72,19 @@ python run.py train --round 1 --no-resume    # retrain even if adapter exists
 ## Key tunables (`.env` / `params.yaml`)
 
 `BASE_MODEL`, `MLX_ITERS`, `LORA_R`, `MLX_NUM_LAYERS`, `EPOCHS`, `SAVE_EVERY`.
+
+
+## Correctness & tracking (hardened in later audits)
+
+- **`params.yaml` is authoritative.** Hyper-parameters (`iters`, `epochs`,
+  `lora_r`, `save_every`, `base_model`) default to *unset* in the API/service and
+  are resolved from `params.yaml` — an explicit value still overrides. This fixes
+  the old bug where the service's own defaults silently beat `params.yaml`.
+- **Clean-exit only.** A non-zero exit code from `train.py` is treated as a
+  failure (the stage never accepts a half-written adapter), and the previous
+  round's *fused* model (not a bare adapter) is used as the start model.
+- **MLflow.** The loss curve + params are logged during training and the
+  evaluation metrics are attached to the **same** run (linked experiments); all
+  of this is a no-op if MLflow isn't installed.
+- **Coverage.** `GET /api/training/coverage?round_num=N` reports how many of a
+  round's rows are new vs already used to train (content-hash registry).
